@@ -699,7 +699,7 @@ st.subheader("Simulation Settings")
 sim_preset = st.radio(
     "Quality Preset",
     ["Fast (1,000)", "Balanced (5,000)", "Deep (20,000)"],
-    index=1,
+    index=1 if sim_config.preset is None else {"fast": 0, "balanced": 1, "deep": 2}[sim_config.preset],
     horizontal=True,
 )
 preset_map = {"Fast (1,000)": "fast", "Balanced (5,000)": "balanced", "Deep (20,000)": "deep"}
