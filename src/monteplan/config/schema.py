@@ -152,8 +152,6 @@ class PlanConfig(BaseModel):
 
     @model_validator(mode="after")
     def _validate_ages(self) -> PlanConfig:
-        if self.retirement_age <= self.current_age:
-            raise ValueError("retirement_age must be greater than current_age")
         if self.end_age <= self.retirement_age:
             raise ValueError("end_age must be greater than retirement_age")
         if self.income_end_age is None:
