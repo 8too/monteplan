@@ -53,6 +53,9 @@ class SimulationResult:
     config_hash: str = ""
     engine_version: str = ""
     all_paths: np.ndarray | None = field(default=None, repr=False)
+    inflation_rates: np.ndarray | None = field(default=None, repr=False)
+    spending_history: np.ndarray | None = field(default=None, repr=False)
+
 
 
 def simulate(
@@ -500,4 +503,6 @@ def simulate(
         config_hash=compute_config_hash(plan, market, policies, sim_config),
         engine_version=__version__,
         all_paths=wealth_history if sim_config.store_paths else None,
+        inflation_rates=inflation_rates if sim_config.store_paths else None,
+        spending_history=spending_history if sim_config.store_paths else None
     )
