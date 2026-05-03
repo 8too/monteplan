@@ -86,6 +86,8 @@ class TestSimulateBasic:
         )
         assert result_yes.all_paths is not None
         assert result_yes.all_paths.shape == (50, result_yes.n_steps + 1)
+        assert result_yes.inflation_rates.shape == (50, result_yes.n_steps)
+        assert result_yes.spending_history.shape == (50, result_yes.n_steps)
 
 
 class TestDeterminism:

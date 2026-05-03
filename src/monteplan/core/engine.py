@@ -55,6 +55,9 @@ class SimulationResult:
     config_hash: str = ""
     engine_version: str = ""
     all_paths: np.ndarray | None = field(default=None, repr=False)
+    inflation_rates: np.ndarray | None = field(default=None, repr=False)
+    spending_history: np.ndarray | None = field(default=None, repr=False)
+
 
     terminal_inflation: np.ndarray | None = field(default=None, repr=False)
     """Per-path cumulative inflation factor at the final step, shape ``(n_paths,)``.
@@ -546,4 +549,6 @@ def simulate(
         all_paths=wealth_history if sim_config.store_paths else None,
         terminal_inflation=terminal_inflation,
         terminal_wealth_real_percentiles=terminal_wealth_real_percentiles,
+        inflation_rates=inflation_rates if sim_config.store_paths else None,
+        spending_history=spending_history if sim_config.store_paths else None,
     )
