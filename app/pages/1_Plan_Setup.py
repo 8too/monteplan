@@ -22,7 +22,7 @@ with col1:
     current_age = st.number_input("Current Age", min_value=18, max_value=100, value=plan.current_age)
 with col2:
     retirement_age = st.number_input(
-        "Retirement Age", min_value=current_age + 1, max_value=100, value=max(plan.retirement_age, current_age + 1)
+        "Retirement Age", min_value=1, max_value=100, value=max(plan.retirement_age, current_age + 1)
     )
 with col3:
     end_age = st.number_input(
@@ -51,7 +51,7 @@ with col3:
 
 income_end_age = st.number_input(
     "Income End Age",
-    min_value=current_age,
+    min_value=1,
     max_value=end_age,
     value=min(plan.income_end_age or retirement_age, end_age),
 )
