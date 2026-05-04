@@ -6,16 +6,20 @@ import numpy as np
 import pytest
 from numpy.random import PCG64DXSM, Generator
 
-from monteplan.config.schema import AssetClass, MarketAssumptions
+from monteplan.config.schema import AssetAllocation, AssetClass, MarketAssumptions
 from monteplan.models.returns.mvn import MultivariateNormalReturns, StudentTReturns
 
 
 @pytest.fixture
 def market() -> MarketAssumptions:
     return MarketAssumptions(
-        assets=[
-            AssetClass(name="Stocks", weight=0.6),
-            AssetClass(name="Bonds", weight=0.4),
+        asset_allocations=[
+            AssetAllocation(
+                assets=[
+                    AssetClass(name="Stocks", weight=0.6),
+                    AssetClass(name="Bonds", weight=0.4),
+                ]
+            )
         ],
         expected_annual_returns=[0.08, 0.03],
         annual_volatilities=[0.16, 0.05],
@@ -66,7 +70,11 @@ class TestMVN:
 class TestStudentT:
     def test_output_shape(self) -> None:
         market = MarketAssumptions(
-            assets=[AssetClass(name="S", weight=0.6), AssetClass(name="B", weight=0.4)],
+            asset_allocations=[
+                AssetAllocation(
+                    assets=[AssetClass(name="S", weight=0.6), AssetClass(name="B", weight=0.4)]
+                )
+            ],
             expected_annual_returns=[0.08, 0.03],
             annual_volatilities=[0.16, 0.05],
             correlation_matrix=[[1.0, 0.2], [0.2, 1.0]],
@@ -80,13 +88,13 @@ class TestStudentT:
     def test_fatter_tails_than_normal(self) -> None:
         """Student-t should produce more extreme returns than normal."""
         market_mvn = MarketAssumptions(
-            assets=[AssetClass(name="S", weight=1.0)],
+            asset_allocations=[AssetAllocation(assets=[AssetClass(name="S", weight=1.0)])],
             expected_annual_returns=[0.08],
             annual_volatilities=[0.16],
             correlation_matrix=[[1.0]],
         )
         market_t = MarketAssumptions(
-            assets=[AssetClass(name="S", weight=1.0)],
+            asset_allocations=[AssetAllocation(assets=[AssetClass(name="S", weight=1.0)])],
             expected_annual_returns=[0.08],
             annual_volatilities=[0.16],
             correlation_matrix=[[1.0]],
@@ -108,7 +116,7 @@ class TestStudentT:
 
     def test_deterministic(self) -> None:
         market = MarketAssumptions(
-            assets=[AssetClass(name="S", weight=1.0)],
+            asset_allocations=[AssetAllocation(assets=[AssetClass(name="S", weight=1.0)])],
             expected_annual_returns=[0.08],
             annual_volatilities=[0.16],
             correlation_matrix=[[1.0]],

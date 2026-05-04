@@ -7,6 +7,7 @@ import pytest
 
 from monteplan.config.defaults import default_plan, default_policies
 from monteplan.config.schema import (
+    AssetAllocation,
     AssetClass,
     MarketAssumptions,
     RegimeConfig,
@@ -243,9 +244,13 @@ class TestRegimeSwitchingInflation:
 class TestEngineWithRegimeSwitching:
     def _make_rs_market(self) -> MarketAssumptions:
         return MarketAssumptions(
-            assets=[
-                AssetClass(name="US Stocks", weight=0.7),
-                AssetClass(name="US Bonds", weight=0.3),
+            asset_allocations=[
+                AssetAllocation(
+                    assets=[
+                        AssetClass(name="US Stocks", weight=0.7),
+                        AssetClass(name="US Bonds", weight=0.3),
+                    ]
+                )
             ],
             expected_annual_returns=[0.07, 0.03],
             annual_volatilities=[0.16, 0.06],
@@ -272,7 +277,7 @@ class TestEngineWithRegimeSwitching:
 
     def test_missing_config_raises(self) -> None:
         market = MarketAssumptions(
-            assets=[AssetClass(name="Stocks", weight=1.0)],
+            asset_allocations=[AssetAllocation(assets=[AssetClass(name="Stocks", weight=1.0)])],
             expected_annual_returns=[0.07],
             annual_volatilities=[0.16],
             correlation_matrix=[[1.0]],

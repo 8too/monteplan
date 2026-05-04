@@ -18,12 +18,12 @@ def apply_contributions(
     Args:
         state: Current simulation state (positions will be mutated).
         monthly_contributions: Base monthly contribution for each account.
-        target_weights: (n_assets,) target asset allocation weights.
+        target_weights: (n_accounts, n_assets) target asset allocation weights.
         growth_factor: Cumulative income growth factor (1.0 = no growth).
     """
     for i, contrib in enumerate(monthly_contributions):
         if contrib > 0:
-            state.positions[:, i, :] += contrib * growth_factor * target_weights
+            state.positions[:, i, :] += contrib * growth_factor * target_weights[i, :]
 
 
 def compute_monthly_contributions(annual_contributions: list[float]) -> list[float]:

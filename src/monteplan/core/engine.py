@@ -57,7 +57,6 @@ class SimulationResult:
     spending_history: np.ndarray | None = field(default=None, repr=False)
 
 
-
 def simulate(
     plan: PlanConfig,
     market: MarketAssumptions,
@@ -138,15 +137,25 @@ def simulate(
             timeline,
         )
 
-    # Target asset weights (static or glide path)
-    static_weights = np.array([a.weight for a in market.assets])
-    glide_path = market.glide_path
-    if glide_path is not None:
-        gp_start_weights = np.array(glide_path.start_weights)
-        gp_end_weights = np.array(glide_path.end_weights)
-        gp_start_age = glide_path.start_age
-        gp_end_age = glide_path.end_age
-    weights = static_weights
+    # Target asset weights (static or glide path per account)
+    n_accounts = len(plan.accounts)
+    allocations = market.asset_allocations
+    if len(allocations) == 1 and n_accounts > 1:
+        allocations = allocations * n_accounts
+    elif len(allocations) != n_accounts:
+        raise ValueError(f"Expected {n_accounts} or 1 asset allocations, got {len(allocations)}")
+
+    static_weights = np.zeros((n_accounts, len(allocations[0].assets)))
+    for i, alloc in enumerate(allocations):
+        static_weights[i, :] = [a.weight for a in alloc.assets]
+
+    # Pre-extract glide path information
+    has_glide_path = any(a.glide_path is not None for a in allocations)
+    glide_paths = [a.glide_path for a in allocations]
+    gp_start_weights_list = [np.array(gp.start_weights) if gp else None for gp in glide_paths]
+    gp_end_weights_list = [np.array(gp.end_weights) if gp else None for gp in glide_paths]
+
+    weights = static_weights.copy()
 
     # Initialize state with per-asset-per-account positions
     initial_balances = [a.balance for a in plan.accounts]
@@ -253,15 +262,23 @@ def simulate(
         state.cumulative_inflation *= 1.0 + inflation_rates[:, t]
 
         # Compute current target weights (glide path or static)
-        if glide_path is not None:
+        if has_glide_path:
             age = timeline.age_at(t)
-            if age <= gp_start_age:
-                current_weights = gp_start_weights
-            elif age >= gp_end_age:
-                current_weights = gp_end_weights
-            else:
-                frac = (age - gp_start_age) / (gp_end_age - gp_start_age)
-                current_weights = gp_start_weights + frac * (gp_end_weights - gp_start_weights)
+            current_weights = np.zeros_like(static_weights)
+            for i in range(n_accounts):
+                gp = glide_paths[i]
+                start_w = gp_start_weights_list[i]
+                end_w = gp_end_weights_list[i]
+                if gp is not None and start_w is not None and end_w is not None:
+                    if age <= gp.start_age:
+                        current_weights[i, :] = start_w
+                    elif age >= gp.end_age:
+                        current_weights[i, :] = end_w
+                    else:
+                        frac = (age - gp.start_age) / (gp.end_age - gp.start_age)
+                        current_weights[i, :] = start_w + frac * (end_w - start_w)
+                else:
+                    current_weights[i, :] = static_weights[i, :]
         else:
             current_weights = static_weights
 
@@ -286,7 +303,9 @@ def simulate(
                     acct_bal = state.balances[:, acct_idx]
                     share = acct_bal / safe_total
                     state.positions[:, acct_idx, :] += (
-                        event_amount * share[:, np.newaxis] * current_weights[np.newaxis, :]
+                        event_amount
+                        * share[:, np.newaxis]
+                        * current_weights[acct_idx][np.newaxis, :]
                     )
             else:
                 # Outflow: withdraw pro-rata across accounts
@@ -504,5 +523,5 @@ def simulate(
         engine_version=__version__,
         all_paths=wealth_history if sim_config.store_paths else None,
         inflation_rates=inflation_rates if sim_config.store_paths else None,
-        spending_history=spending_history if sim_config.store_paths else None
+        spending_history=spending_history if sim_config.store_paths else None,
     )

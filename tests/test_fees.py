@@ -2,6 +2,7 @@
 
 from monteplan.config.schema import (
     AccountConfig,
+    AssetAllocation,
     AssetClass,
     MarketAssumptions,
     PlanConfig,
@@ -24,7 +25,7 @@ def _base_plan():
 
 def _base_market(**overrides):
     defaults = dict(
-        assets=[AssetClass(name="Stocks", weight=1.0)],
+        asset_allocations=[AssetAllocation(assets=[AssetClass(name="Stocks", weight=1.0)])],
         expected_annual_returns=[0.0],
         annual_volatilities=[0.0001],
         correlation_matrix=[[1.0]],

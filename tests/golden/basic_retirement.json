@@ -13,9 +13,13 @@
     "income_end_age": 65
   },
   "market": {
-    "assets": [
-      {"name": "US Stocks", "weight": 0.7},
-      {"name": "US Bonds", "weight": 0.3}
+    "asset_allocations": [
+      {
+        "assets": [
+          {"name": "US Stocks", "weight": 0.7},
+          {"name": "US Bonds", "weight": 0.3}
+        ]
+      }
     ],
     "expected_annual_returns": [0.07, 0.03],
     "annual_volatilities": [0.16, 0.06],

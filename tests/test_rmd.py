@@ -6,6 +6,7 @@ import numpy as np
 
 from monteplan.config.schema import (
     AccountConfig,
+    AssetAllocation,
     AssetClass,
     MarketAssumptions,
     PlanConfig,
@@ -71,7 +72,7 @@ class TestRMDEngineIntegration:
             monthly_spending=1_000,  # Very low spending
         )
         market = MarketAssumptions(
-            assets=[AssetClass(name="Stocks", weight=1.0)],
+            asset_allocations=[AssetAllocation(assets=[AssetClass(name="Stocks", weight=1.0)])],
             expected_annual_returns=[0.0],
             annual_volatilities=[0.001],
             correlation_matrix=[[1.0]],

@@ -109,29 +109,31 @@ def _equity_allocation_setter(m: MarketAssumptions, val: float) -> MarketAssumpt
     clamped = max(0.0, min(1.0, val))
     bond_total = 1.0 - clamped
 
-    stock_indices = [i for i, a in enumerate(m.assets) if "Stock" in a.name]
-    bond_indices = [i for i, a in enumerate(m.assets) if "Bond" in a.name]
+    stock_indices = [i for i, a in enumerate(m.asset_allocations[0].assets) if "Stock" in a.name]
+    bond_indices = [i for i, a in enumerate(m.asset_allocations[0].assets) if "Bond" in a.name]
 
     # Current totals for proportional scaling
-    current_stock_total = sum(m.assets[i].weight for i in stock_indices)
-    current_bond_total = sum(m.assets[i].weight for i in bond_indices)
+    current_stock_total = sum(m.asset_allocations[0].assets[i].weight for i in stock_indices)
+    current_bond_total = sum(m.asset_allocations[0].assets[i].weight for i in bond_indices)
 
-    new_assets = list(m.assets)
+    new_assets = list(m.asset_allocations[0].assets)
     for i in stock_indices:
         if current_stock_total > 0:
-            ratio = m.assets[i].weight / current_stock_total
+            ratio = m.asset_allocations[0].assets[i].weight / current_stock_total
         else:
             ratio = 1.0 / len(stock_indices) if stock_indices else 0.0
         new_assets[i] = AssetClass(name=new_assets[i].name, weight=clamped * ratio)
 
     for i in bond_indices:
         if current_bond_total > 0:
-            ratio = m.assets[i].weight / current_bond_total
+            ratio = m.asset_allocations[0].assets[i].weight / current_bond_total
         else:
             ratio = 1.0 / len(bond_indices) if bond_indices else 0.0
         new_assets[i] = AssetClass(name=new_assets[i].name, weight=bond_total * ratio)
 
-    return m.model_copy(update={"assets": new_assets})
+    new_allocations = list(m.asset_allocations)
+    new_allocations[0] = new_allocations[0].model_copy(update={"assets": new_assets})
+    return m.model_copy(update={"asset_allocations": new_allocations})
 
 
 def _build_param_registry(
@@ -141,10 +143,10 @@ def _build_param_registry(
 ) -> dict[str, _ParamSpec]:
     """Build the full registry of perturbable parameters."""
     all_params: dict[str, _ParamSpec] = {}
-    n_assets = len(market.assets)
+    n_assets = len(market.asset_allocations[0].assets)
 
     for i in range(n_assets):
-        asset_name = market.assets[i].name
+        asset_name = market.asset_allocations[0].assets[i].name
         all_params[f"{asset_name} Return"] = _ParamSpec(
             getter=lambda m, idx=i: m.expected_annual_returns[idx],
             setter=_make_market_return_setter(i),
@@ -189,7 +191,9 @@ def _build_param_registry(
     # Equity allocation (total stock weight)
     if n_assets >= 2:
         all_params["Equity Allocation"] = _ParamSpec(
-            getter=lambda m: sum(a.weight for a in m.assets if "Stock" in a.name),
+            getter=lambda m: sum(
+                a.weight for a in m.asset_allocations[0].assets if "Stock" in a.name
+            ),
             setter=_equity_allocation_setter,
             is_additive=False,
         )

@@ -2,6 +2,7 @@
 
 from monteplan.config.schema import (
     AccountConfig,
+    AssetAllocation,
     AssetClass,
     GuaranteedIncomeStream,
     MarketAssumptions,
@@ -15,7 +16,7 @@ from monteplan.core.engine import simulate
 
 def _zero_vol_market():
     return MarketAssumptions(
-        assets=[AssetClass(name="Stocks", weight=1.0)],
+        asset_allocations=[AssetAllocation(assets=[AssetClass(name="Stocks", weight=1.0)])],
         expected_annual_returns=[0.0],
         annual_volatilities=[0.0001],
         correlation_matrix=[[1.0]],

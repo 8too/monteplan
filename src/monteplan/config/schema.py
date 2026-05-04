@@ -193,12 +193,30 @@ class GlidePath(BaseModel):
         return self
 
 
+class AssetAllocation(BaseModel):
+    """The asset allocation and glide path for one specific account."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    assets: list[AssetClass] = Field(min_length=1)
+    glide_path: GlidePath | None = Field(
+        default=None,
+        description="Age-based glide path; when set, overrides static asset weights over time",
+    )
+
+
 class MarketAssumptions(BaseModel):
     """Market return and inflation assumptions."""
 
     model_config = ConfigDict(extra="forbid")
 
-    assets: list[AssetClass] = Field(min_length=1)
+    asset_allocations: list[AssetAllocation] = Field(
+        min_length=1,
+        description=(
+            "One asset allocation per account, or a single allocation "
+            "to broadcast to all accounts."
+        ),
+    )
     expected_annual_returns: list[float]
     annual_volatilities: list[float]
     correlation_matrix: list[list[float]]
@@ -226,10 +244,6 @@ class MarketAssumptions(BaseModel):
         default=None,
         description="Regime-switching model configuration",
     )
-    glide_path: GlidePath | None = Field(
-        default=None,
-        description="Age-based glide path; when set, overrides static asset weights over time",
-    )
     expense_ratio: float = Field(
         default=0.0,
         ge=0,
@@ -251,16 +265,23 @@ class MarketAssumptions(BaseModel):
 
     @model_validator(mode="after")
     def _validate_market(self) -> MarketAssumptions:
-        n = len(self.assets)
-        if len(self.expected_annual_returns) != n:
-            raise ValueError(
-                f"expected_annual_returns length ({len(self.expected_annual_returns)}) "
-                f"must match assets length ({n})"
-            )
+        n = len(self.expected_annual_returns)
+        for i, alloc in enumerate(self.asset_allocations):
+            if len(alloc.assets) != n:
+                raise ValueError(
+                    f"asset_allocations[{i}] length ({len(alloc.assets)}) "
+                    f"must match expected_annual_returns length ({n})"
+                )
+            total_weight = sum(a.weight for a in alloc.assets)
+            if abs(total_weight - 1.0) > 1e-6:
+                raise ValueError(
+                    f"Asset weights in allocation {i} must sum to 1.0, got {total_weight}"
+                )
+
         if len(self.annual_volatilities) != n:
             raise ValueError(
                 f"annual_volatilities length ({len(self.annual_volatilities)}) "
-                f"must match assets length ({n})"
+                f"must match expected_annual_returns length ({n})"
             )
         if len(self.correlation_matrix) != n:
             raise ValueError(
@@ -269,11 +290,6 @@ class MarketAssumptions(BaseModel):
         for i, row in enumerate(self.correlation_matrix):
             if len(row) != n:
                 raise ValueError(f"correlation_matrix row {i} has length {len(row)}, expected {n}")
-
-        # Validate weights sum to ~1
-        total_weight = sum(a.weight for a in self.assets)
-        if abs(total_weight - 1.0) > 1e-6:
-            raise ValueError(f"Asset weights must sum to 1.0, got {total_weight}")
 
         # Validate correlation matrix is symmetric and has 1s on diagonal
         corr = np.array(self.correlation_matrix)

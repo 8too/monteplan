@@ -12,6 +12,7 @@ from monteplan.config.defaults import (
 )
 from monteplan.config.schema import (
     AccountConfig,
+    AssetAllocation,
     AssetClass,
     MarketAssumptions,
     PlanConfig,
@@ -134,9 +135,13 @@ class TestGolden:
             monthly_spending=5_000,
         )
         market = MarketAssumptions(
-            assets=[
-                AssetClass(name="US Stocks", weight=0.7),
-                AssetClass(name="US Bonds", weight=0.3),
+            asset_allocations=[
+                AssetAllocation(
+                    assets=[
+                        AssetClass(name="US Stocks", weight=0.7),
+                        AssetClass(name="US Bonds", weight=0.3),
+                    ]
+                )
             ],
             expected_annual_returns=[0.07, 0.03],
             annual_volatilities=[0.16, 0.06],
@@ -154,7 +159,61 @@ class TestGolden:
         # over 30 years of retirement. ~48% success is expected.
         assert result.success_probability == pytest.approx(0.4794, abs=0.03)
         assert result.terminal_wealth_percentiles["p75"] > 1_000_000
-        # Median wealth at retirement should be substantial
+        assert result.wealth_time_series["p50"][420] > 3_000_000
+
+    def test_golden_per_account_allocations(self) -> None:
+        plan = PlanConfig(
+            current_age=30,
+            retirement_age=65,
+            end_age=95,
+            accounts=[
+                AccountConfig(account_type="taxable", balance=50_000, annual_contribution=6_000),
+                AccountConfig(
+                    account_type="traditional", balance=100_000, annual_contribution=20_000
+                ),
+                AccountConfig(account_type="roth", balance=30_000, annual_contribution=7_000),
+            ],
+            monthly_income=8_000,
+            monthly_spending=5_000,
+        )
+        market = MarketAssumptions(
+            asset_allocations=[
+                # Taxable: 100% Bonds
+                AssetAllocation(
+                    assets=[
+                        AssetClass(name="US Stocks", weight=0.0),
+                        AssetClass(name="US Bonds", weight=1.0),
+                    ]
+                ),
+                # Traditional: 50/50 Stocks/Bonds
+                AssetAllocation(
+                    assets=[
+                        AssetClass(name="US Stocks", weight=0.5),
+                        AssetClass(name="US Bonds", weight=0.5),
+                    ]
+                ),
+                # Roth: 100% Stocks
+                AssetAllocation(
+                    assets=[
+                        AssetClass(name="US Stocks", weight=1.0),
+                        AssetClass(name="US Bonds", weight=0.0),
+                    ]
+                ),
+            ],
+            expected_annual_returns=[0.07, 0.03],
+            annual_volatilities=[0.16, 0.06],
+            correlation_matrix=[[1.0, 0.0], [0.0, 1.0]],
+            inflation_mean=0.03,
+            inflation_vol=0.01,
+        )
+        policies = PolicyBundle()
+        sim = SimulationConfig(n_paths=5000, seed=42)
+
+        result = simulate(plan, market, policies, sim)
+
+        # Expected success should be around 39.7%
+        assert result.success_probability == pytest.approx(0.3968, abs=0.03)
+        assert result.terminal_wealth_percentiles["p75"] > 1_000_000
         assert result.wealth_time_series["p50"][420] > 3_000_000
 
     def test_golden_regime_switching(self) -> None:
@@ -195,9 +254,13 @@ class TestGolden:
             initial_regime=1,
         )
         market = MarketAssumptions(
-            assets=[
-                AssetClass(name="US Stocks", weight=0.7),
-                AssetClass(name="US Bonds", weight=0.3),
+            asset_allocations=[
+                AssetAllocation(
+                    assets=[
+                        AssetClass(name="US Stocks", weight=0.7),
+                        AssetClass(name="US Bonds", weight=0.3),
+                    ]
+                )
             ],
             expected_annual_returns=[0.07, 0.03],
             annual_volatilities=[0.16, 0.06],
@@ -295,9 +358,13 @@ def test_benchmark_regime_switching(benchmark) -> None:  # type: ignore[no-untyp
         initial_regime=1,
     )
     market = MarketAssumptions(
-        assets=[
-            AssetClass(name="US Stocks", weight=0.7),
-            AssetClass(name="US Bonds", weight=0.3),
+        asset_allocations=[
+            AssetAllocation(
+                assets=[
+                    AssetClass(name="US Stocks", weight=0.7),
+                    AssetClass(name="US Bonds", weight=0.3),
+                ]
+            )
         ],
         expected_annual_returns=[0.07, 0.03],
         annual_volatilities=[0.16, 0.06],

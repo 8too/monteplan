@@ -29,35 +29,37 @@ from monteplan.core.engine import simulate
 class TestDefaultMarket:
     def test_default_market_has_6_assets(self) -> None:
         market = default_market()
-        assert len(market.assets) == 6
+        assert len(market.asset_allocations[0].assets) == 6
 
     def test_asset_names(self) -> None:
         market = default_market()
-        names = [a.name for a in market.assets]
+        names = [a.name for a in market.asset_allocations[0].assets]
         assert names == ALL_ASSET_NAMES
 
     def test_weights_sum_to_one(self) -> None:
         market = default_market()
-        total = sum(a.weight for a in market.assets)
+        total = sum(a.weight for a in market.asset_allocations[0].assets)
         assert total == pytest.approx(1.0, abs=1e-9)
 
     def test_stock_bond_split_is_60_40(self) -> None:
         market = default_market()
-        stock_total = sum(a.weight for a in market.assets if "Stock" in a.name)
-        bond_total = sum(a.weight for a in market.assets if "Bond" in a.name)
+        stock_total = sum(
+            a.weight for a in market.asset_allocations[0].assets if "Stock" in a.name
+        )
+        bond_total = sum(a.weight for a in market.asset_allocations[0].assets if "Bond" in a.name)
         assert stock_total == pytest.approx(0.60, abs=1e-9)
         assert bond_total == pytest.approx(0.40, abs=1e-9)
 
     def test_regional_split_within_stocks(self) -> None:
         market = default_market()
-        stock_weights = [a.weight for a in market.assets if "Stock" in a.name]
+        stock_weights = [a.weight for a in market.asset_allocations[0].assets if "Stock" in a.name]
         total = sum(stock_weights)
         ratios = [w / total for w in stock_weights]
         assert ratios == pytest.approx([0.60, 0.30, 0.10], abs=1e-9)
 
     def test_regional_split_within_bonds(self) -> None:
         market = default_market()
-        bond_weights = [a.weight for a in market.assets if "Bond" in a.name]
+        bond_weights = [a.weight for a in market.asset_allocations[0].assets if "Bond" in a.name]
         total = sum(bond_weights)
         ratios = [w / total for w in bond_weights]
         assert ratios == pytest.approx([0.60, 0.30, 0.10], abs=1e-9)
@@ -149,14 +151,14 @@ class TestBuildGlobalWeights:
 class TestUSOnlyMarket:
     def test_us_only_market_has_2_assets(self) -> None:
         market = us_only_market()
-        assert len(market.assets) == 2
-        assert market.assets[0].name == "US Stocks"
-        assert market.assets[1].name == "US Bonds"
+        assert len(market.asset_allocations[0].assets) == 2
+        assert market.asset_allocations[0].assets[0].name == "US Stocks"
+        assert market.asset_allocations[0].assets[1].name == "US Bonds"
 
     def test_us_only_weights(self) -> None:
         market = us_only_market()
-        assert market.assets[0].weight == pytest.approx(0.70)
-        assert market.assets[1].weight == pytest.approx(0.30)
+        assert market.asset_allocations[0].assets[0].weight == pytest.approx(0.70)
+        assert market.asset_allocations[0].assets[1].weight == pytest.approx(0.30)
 
     def test_us_only_aggregate_vs_treasuries(self) -> None:
         agg = us_only_market(bond_type="aggregate")
@@ -169,7 +171,7 @@ class TestGlobalMarketAlias:
     def test_global_market_equals_default(self) -> None:
         gm = global_market()
         dm = default_market()
-        assert gm.assets == dm.assets
+        assert gm.asset_allocations[0].assets == dm.asset_allocations[0].assets
         assert gm.expected_annual_returns == dm.expected_annual_returns
 
 
@@ -195,7 +197,7 @@ class TestSimulationWith6Assets:
 
     def test_6_asset_with_glide_path(self) -> None:
         market = default_market()
-        weights = [a.weight for a in market.assets]
+        weights = [a.weight for a in market.asset_allocations[0].assets]
         # End weights: 30% stocks, 70% bonds with same regional ratios
         end_weights = build_global_weights(stock_pct=0.30)
 
@@ -230,13 +232,19 @@ class TestEquityAllocationSetter:
 
         # Set to 80% equities
         new_market = spec.setter(market, 0.80)
-        stock_total = sum(a.weight for a in new_market.assets if "Stock" in a.name)
-        bond_total = sum(a.weight for a in new_market.assets if "Bond" in a.name)
+        stock_total = sum(
+            a.weight for a in new_market.asset_allocations[0].assets if "Stock" in a.name
+        )
+        bond_total = sum(
+            a.weight for a in new_market.asset_allocations[0].assets if "Bond" in a.name
+        )
         assert stock_total == pytest.approx(0.80, abs=1e-9)
         assert bond_total == pytest.approx(0.20, abs=1e-9)
 
         # Regional ratios within stocks should be preserved
-        stock_weights = [a.weight for a in new_market.assets if "Stock" in a.name]
+        stock_weights = [
+            a.weight for a in new_market.asset_allocations[0].assets if "Stock" in a.name
+        ]
         ratios = [w / stock_total for w in stock_weights]
         assert ratios == pytest.approx([0.60, 0.30, 0.10], abs=1e-9)
 
@@ -250,8 +258,8 @@ class TestEquityAllocationSetter:
         assert spec.getter(market) == pytest.approx(0.70, abs=1e-9)
 
         new_market = spec.setter(market, 0.50)
-        assert new_market.assets[0].weight == pytest.approx(0.50, abs=1e-9)
-        assert new_market.assets[1].weight == pytest.approx(0.50, abs=1e-9)
+        assert new_market.asset_allocations[0].assets[0].weight == pytest.approx(0.50, abs=1e-9)
+        assert new_market.asset_allocations[0].assets[1].weight == pytest.approx(0.50, abs=1e-9)
 
     def test_sensitivity_with_6_assets(self) -> None:
         report = run_sensitivity(

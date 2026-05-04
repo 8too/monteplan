@@ -35,7 +35,7 @@ class TestSerialize:
         json_str = golden_path.read_text()
         plan, market, policies, sim = load_config(json_str)
         assert plan.current_age == 30
-        assert len(market.assets) == 2
+        assert len(market.asset_allocations[0].assets) == 2
         assert sim.n_paths == 5000
 
     def test_config_hash_deterministic(self) -> None:
