@@ -4,6 +4,7 @@ import numpy as np
 
 from monteplan.config.schema import (
     AccountConfig,
+    AssetAllocation,
     AssetClass,
     MarketAssumptions,
     PlanConfig,
@@ -46,7 +47,7 @@ def test_no_rebalance_within_threshold():
     # 1 path, 1 account, 2 assets: 68% / 32% with target 70/30
     positions = np.array([[[68_000.0, 32_000.0]]])
     state = _make_state(1, positions)
-    target = np.array([0.7, 0.3])
+    target = np.array([[0.7, 0.3]])
 
     original = state.positions.copy()
     rebalance_if_drifted(state, target, threshold=0.05)
@@ -59,7 +60,7 @@ def test_rebalance_when_drifted():
     # 1 path, 1 account, 2 assets: 80% / 20% with target 70/30 → drift 10%
     positions = np.array([[[80_000.0, 20_000.0]]])
     state = _make_state(1, positions)
-    target = np.array([0.7, 0.3])
+    target = np.array([[0.7, 0.3]])
 
     rebalance_if_drifted(state, target, threshold=0.05)
 
@@ -78,7 +79,7 @@ def test_mixed_paths_selective_rebalance():
         ]
     )
     state = _make_state(2, positions)
-    target = np.array([0.7, 0.3])
+    target = np.array([[0.7, 0.3]])
 
     rebalance_if_drifted(state, target, threshold=0.05)
 
@@ -99,9 +100,13 @@ def test_threshold_rebalancing_integration():
         monthly_spending=3000,
     )
     market = MarketAssumptions(
-        assets=[
-            AssetClass(name="Stocks", weight=0.7),
-            AssetClass(name="Bonds", weight=0.3),
+        asset_allocations=[
+            AssetAllocation(
+                assets=[
+                    AssetClass(name="Stocks", weight=0.7),
+                    AssetClass(name="Bonds", weight=0.3),
+                ]
+            )
         ],
         expected_annual_returns=[0.07, 0.03],
         annual_volatilities=[0.16, 0.06],

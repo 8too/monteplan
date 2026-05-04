@@ -7,6 +7,7 @@ import pytest
 
 from monteplan.config.schema import (
     AccountConfig,
+    AssetAllocation,
     AssetClass,
     DiscreteEvent,
     MarketAssumptions,
@@ -34,7 +35,7 @@ def _simple_plan(**overrides) -> PlanConfig:
 
 def _simple_market() -> MarketAssumptions:
     return MarketAssumptions(
-        assets=[AssetClass(name="Stocks", weight=1.0)],
+        asset_allocations=[AssetAllocation(assets=[AssetClass(name="Stocks", weight=1.0)])],
         expected_annual_returns=[0.0],
         annual_volatilities=[0.001],
         correlation_matrix=[[1.0]],

@@ -64,14 +64,15 @@ class SimulationState:
             n_paths: Number of simulation paths.
             initial_balances: Starting balance for each account.
             account_types: Account type labels.
-            target_weights: (n_assets,) target asset allocation weights summing to 1.
+            target_weights: (n_accounts, n_assets) target asset allocation weights summing to 1
+                per account.
         """
         n_accounts = len(initial_balances)
-        n_assets = len(target_weights)
-        # positions[p, a, k] = balance_a * weight_k
+        n_assets = target_weights.shape[1]
+        # positions[p, a, k] = balance_a * weight_a,k
         bal = np.array(initial_balances)  # (n_accounts,)
-        # (n_accounts, n_assets) = outer product
-        account_positions = bal[:, np.newaxis] * target_weights[np.newaxis, :]
+        # (n_accounts, n_assets)
+        account_positions = bal[:, np.newaxis] * target_weights
         # Tile across all paths → (n_paths, n_accounts, n_assets)
         positions = np.tile(account_positions, (n_paths, 1, 1))
         return cls(

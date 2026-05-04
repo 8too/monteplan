@@ -23,7 +23,7 @@ class TestRebalancing:
             n_assets=2,
             account_types=["taxable"],
         )
-        target_weights = np.array([0.7, 0.3])
+        target_weights = np.array([[0.7, 0.3]])
         balance_before = state.balances[0, 0]
         rebalance_to_targets(state, target_weights)
         np.testing.assert_allclose(state.balances[0, 0], balance_before)
@@ -41,7 +41,7 @@ class TestRebalancing:
             n_assets=2,
             account_types=["taxable"],
         )
-        target_weights = np.array([0.7, 0.3])
+        target_weights = np.array([[0.7, 0.3]])
         rebalance_to_targets(state, target_weights)
         # Total = 100k, so stocks=70k, bonds=30k
         np.testing.assert_allclose(state.positions[0, 0, 0], 70_000.0)
@@ -60,7 +60,7 @@ class TestRebalancing:
             n_assets=2,
             account_types=["taxable", "traditional"],
         )
-        target_weights = np.array([0.6, 0.4])
+        target_weights = np.array([[0.6, 0.4], [0.6, 0.4]])
         rebalance_to_targets(state, target_weights)
         # Account 0: total=100k → 60k/40k
         np.testing.assert_allclose(state.positions[0, 0, :], [60_000.0, 40_000.0])
@@ -85,7 +85,7 @@ class TestRebalancing:
             n_assets=2,
             account_types=["taxable"],
         )
-        target_weights = np.array([0.7, 0.3])
+        target_weights = np.array([[0.7, 0.3]])
         rebalance_to_targets(state, target_weights)
         # Path 0: total=100k → 70k/30k
         np.testing.assert_allclose(state.positions[0, 0, :], [70_000.0, 30_000.0])

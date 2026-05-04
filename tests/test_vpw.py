@@ -6,6 +6,7 @@ import numpy as np
 
 from monteplan.config.schema import (
     AccountConfig,
+    AssetAllocation,
     AssetClass,
     MarketAssumptions,
     PlanConfig,
@@ -90,7 +91,7 @@ class TestVPW:
             spending=SpendingPolicyConfig(policy_type="vpw"),
         )
         market = MarketAssumptions(
-            assets=[AssetClass(name="Stocks", weight=1.0)],
+            asset_allocations=[AssetAllocation(assets=[AssetClass(name="Stocks", weight=1.0)])],
             expected_annual_returns=[0.07],
             annual_volatilities=[0.16],
             correlation_matrix=[[1.0]],

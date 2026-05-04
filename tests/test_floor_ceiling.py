@@ -9,7 +9,7 @@ from monteplan.policies.spending.floor_ceiling import FloorCeilingSpending
 
 def _make_state(n_paths, total_wealth, cumulative_inflation=1.0):
     """Create a minimal SimulationState for spending tests."""
-    weights = np.array([1.0])
+    weights = np.array([[1.0]])
     state = SimulationState.initialize(
         n_paths=n_paths,
         initial_balances=[0.0],

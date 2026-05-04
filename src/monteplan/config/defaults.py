@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from monteplan.config.schema import (
     AccountConfig,
+    AssetAllocation,
     AssetClass,
     MarketAssumptions,
     PlanConfig,
@@ -115,8 +116,12 @@ def default_market(bond_type: str = "aggregate") -> MarketAssumptions:
         bond_returns = list(_BOND_RETURNS_AGGREGATE)
         bond_vols = list(_BOND_VOLS_AGGREGATE)
 
+    # We supply 1 asset allocation here; the engine will automatically broadcast this
+    # to all N accounts in the plan when simulate() is called.
+    asset_alloc = AssetAllocation(assets=assets)
+
     return MarketAssumptions(
-        assets=assets,
+        asset_allocations=[asset_alloc],
         expected_annual_returns=list(_STOCK_RETURNS_NOMINAL) + bond_returns,
         annual_volatilities=list(_STOCK_VOLS) + bond_vols,
         correlation_matrix=[list(row) for row in CORRELATION_CONSENSUS],
@@ -145,11 +150,17 @@ def us_only_market(bond_type: str = "aggregate") -> MarketAssumptions:
         bond_return = 0.05
         bond_vol = 0.07
 
-    return MarketAssumptions(
+    # We supply 1 asset allocation here; the engine will automatically broadcast this
+    # to all N accounts in the plan when simulate() is called.
+    asset_alloc = AssetAllocation(
         assets=[
             AssetClass(name="US Stocks", weight=0.7),
             AssetClass(name="US Bonds", weight=0.3),
-        ],
+        ]
+    )
+
+    return MarketAssumptions(
+        asset_allocations=[asset_alloc],
         expected_annual_returns=[0.08, bond_return],
         annual_volatilities=[0.16, bond_vol],
         correlation_matrix=[

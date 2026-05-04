@@ -7,6 +7,7 @@ import pytest
 
 from monteplan.config.schema import (
     AccountConfig,
+    AssetAllocation,
     AssetClass,
     MarketAssumptions,
     PlanConfig,
@@ -289,7 +290,7 @@ class TestEngineIntegration:
             monthly_spending=4_000,
         )
         market = MarketAssumptions(
-            assets=[AssetClass(name="Stocks", weight=1.0)],
+            asset_allocations=[AssetAllocation(assets=[AssetClass(name="Stocks", weight=1.0)])],
             expected_annual_returns=[0.07],
             annual_volatilities=[0.15],
             correlation_matrix=[[1.0]],
@@ -331,7 +332,7 @@ class TestEngineIntegration:
             monthly_spending=2_500,
         )
         market = MarketAssumptions(
-            assets=[AssetClass(name="S", weight=1.0)],
+            asset_allocations=[AssetAllocation(assets=[AssetClass(name="S", weight=1.0)])],
             expected_annual_returns=[0.06],
             annual_volatilities=[0.12],
             correlation_matrix=[[1.0]],

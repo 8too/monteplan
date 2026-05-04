@@ -6,6 +6,7 @@ import pytest
 
 from monteplan.config.schema import (
     AccountConfig,
+    AssetAllocation,
     AssetClass,
     GlidePath,
     MarketAssumptions,
@@ -58,19 +59,23 @@ class TestGlidePathConfig:
 class TestGlidePathSimulation:
     def _market_with_glide_path(self) -> MarketAssumptions:
         return MarketAssumptions(
-            assets=[
-                AssetClass(name="Stocks", weight=0.7),
-                AssetClass(name="Bonds", weight=0.3),
+            asset_allocations=[
+                AssetAllocation(
+                    assets=[
+                        AssetClass(name="Stocks", weight=0.7),
+                        AssetClass(name="Bonds", weight=0.3),
+                    ],
+                    glide_path=GlidePath(
+                        start_age=30,
+                        start_weights=[0.9, 0.1],
+                        end_age=95,
+                        end_weights=[0.4, 0.6],
+                    ),
+                )
             ],
             expected_annual_returns=[0.07, 0.03],
             annual_volatilities=[0.16, 0.06],
             correlation_matrix=[[1.0, 0.0], [0.0, 1.0]],
-            glide_path=GlidePath(
-                start_age=30,
-                start_weights=[0.9, 0.1],
-                end_age=95,
-                end_weights=[0.4, 0.6],
-            ),
         )
 
     def test_runs_with_glide_path(self) -> None:
@@ -102,9 +107,13 @@ class TestGlidePathSimulation:
         )
         # Run without glide path (static 70/30)
         market_static = MarketAssumptions(
-            assets=[
-                AssetClass(name="Stocks", weight=0.7),
-                AssetClass(name="Bonds", weight=0.3),
+            asset_allocations=[
+                AssetAllocation(
+                    assets=[
+                        AssetClass(name="Stocks", weight=0.7),
+                        AssetClass(name="Bonds", weight=0.3),
+                    ]
+                )
             ],
             expected_annual_returns=[0.07, 0.03],
             annual_volatilities=[0.16, 0.06],
@@ -120,12 +129,16 @@ class TestGlidePathSimulation:
     def test_none_glide_path_uses_static(self) -> None:
         """When glide_path is None, static weights from assets apply."""
         market = MarketAssumptions(
-            assets=[
-                AssetClass(name="Stocks", weight=0.7),
-                AssetClass(name="Bonds", weight=0.3),
+            asset_allocations=[
+                AssetAllocation(
+                    assets=[
+                        AssetClass(name="Stocks", weight=0.7),
+                        AssetClass(name="Bonds", weight=0.3),
+                    ]
+                )
             ],
             expected_annual_returns=[0.07, 0.03],
             annual_volatilities=[0.16, 0.06],
             correlation_matrix=[[1.0, 0.0], [0.0, 1.0]],
         )
-        assert market.glide_path is None
+        assert market.asset_allocations[0].glide_path is None
