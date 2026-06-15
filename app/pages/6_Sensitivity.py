@@ -52,11 +52,11 @@ with col1:
     )
 
 # Build default parameter list
-n_assets = len(market.assets)
+n_assets = len(market.asset_allocations[0].assets)
 default_params: list[str] = []
 for i in range(n_assets):
-    default_params.append(f"{market.assets[i].name} Return")
-    default_params.append(f"{market.assets[i].name} Volatility")
+    default_params.append(f"{market.asset_allocations[0].assets[i].name} Return")
+    default_params.append(f"{market.asset_allocations[0].assets[i].name} Volatility")
 default_params.append("Inflation Rate")
 default_params.append("Monthly Spending")
 default_params.append("Retirement Age")

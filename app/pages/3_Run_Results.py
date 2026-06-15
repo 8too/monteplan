@@ -151,26 +151,31 @@ with st.expander("Current Configuration"):
             st.write(f"Discrete Events: {len(plan.discrete_events)}")
     with col2:
         st.markdown("**Portfolio & Market**")
-        stock_total = sum(a.weight for a in market.assets if "Stock" in a.name)
-        bond_total = sum(a.weight for a in market.assets if "Bond" in a.name)
-        n_ast = len(market.assets)
-        st.write(
-            f"Allocation: {stock_total:.0%} stocks"
-            f" / {bond_total:.0%} bonds ({n_ast} assets)"
-        )
+        for idx, alloc in enumerate(market.asset_allocations):
+            name_prefix = ""
+            if len(market.asset_allocations) > 1:
+                account_name = plan.accounts[idx].account_type.title() if idx < len(plan.accounts) else f"Account {idx + 1}"
+                name_prefix = f"**{account_name}**: "
+            stock_total = sum(a.weight for a in alloc.assets if "Stock" in a.name)
+            bond_total = sum(a.weight for a in alloc.assets if "Bond" in a.name)
+            n_ast = len(alloc.assets)
+            st.write(
+                f"{name_prefix}{stock_total:.0%} stocks"
+                f" / {bond_total:.0%} bonds ({n_ast} assets)"
+            )
+            if alloc.glide_path:
+                gp_start_stock = sum(
+                    alloc.glide_path.start_weights[i]
+                    for i in range(len(alloc.glide_path.start_weights))
+                    if i < len(alloc.assets) and "Stock" in alloc.assets[i].name
+                )
+                gp_end_stock = sum(
+                    alloc.glide_path.end_weights[i]
+                    for i in range(len(alloc.glide_path.end_weights))
+                    if i < len(alloc.assets) and "Stock" in alloc.assets[i].name
+                )
+                st.write(f"Glide Path ({account_name if len(market.asset_allocations) > 1 else 'All'}): {gp_start_stock:.0%} → {gp_end_stock:.0%} stocks")
         st.write(f"Return Model: {market.return_model}")
-        if market.glide_path:
-            gp_start_stock = sum(
-                market.glide_path.start_weights[i]
-                for i in range(len(market.glide_path.start_weights))
-                if i < len(market.assets) and "Stock" in market.assets[i].name
-            )
-            gp_end_stock = sum(
-                market.glide_path.end_weights[i]
-                for i in range(len(market.glide_path.end_weights))
-                if i < len(market.assets) and "Stock" in market.assets[i].name
-            )
-            st.write(f"Glide Path: {gp_start_stock:.0%} → {gp_end_stock:.0%} stocks")
         if sim_config.stress_scenarios:
             st.write(f"Stress Scenarios: {len(sim_config.stress_scenarios)}")
     with col3:
@@ -300,22 +305,48 @@ if "result_data" in st.session_state:
         # Allocation area chart in details
         from app.components.charts import allocation_area_chart
 
-        assets_data = [{"name": a.name, "weight": a.weight} for a in market.assets]
-        gp_data = None
-        if market.glide_path:
-            gp_data = {
-                "start_age": market.glide_path.start_age,
-                "start_weights": market.glide_path.start_weights,
-                "end_age": market.glide_path.end_age,
-                "end_weights": market.glide_path.end_weights,
-            }
-        alloc_fig = allocation_area_chart(
-            assets_data,
-            gp_data,
-            data["plan_current_age"],
-            data["plan_end_age"],
-        )
-        st.plotly_chart(alloc_fig, use_container_width=True)
+        if len(market.asset_allocations) == 1:
+            alloc = market.asset_allocations[0]
+            assets_data = [{"name": a.name, "weight": a.weight} for a in alloc.assets]
+            gp_data = None
+            if alloc.glide_path:
+                gp_data = {
+                    "start_age": alloc.glide_path.start_age,
+                    "start_weights": alloc.glide_path.start_weights,
+                    "end_age": alloc.glide_path.end_age,
+                    "end_weights": alloc.glide_path.end_weights,
+                }
+            alloc_fig = allocation_area_chart(
+                assets_data,
+                gp_data,
+                data["plan_current_age"],
+                data["plan_end_age"],
+            )
+            st.plotly_chart(alloc_fig, use_container_width=True)
+        else:
+            tabs = st.tabs([
+                plan.accounts[i].account_type.title() if i < len(plan.accounts) else f"Account {i + 1}"
+                for i in range(len(market.asset_allocations))
+            ])
+            for i, tab in enumerate(tabs):
+                with tab:
+                    alloc = market.asset_allocations[i]
+                    assets_data = [{"name": a.name, "weight": a.weight} for a in alloc.assets]
+                    gp_data = None
+                    if alloc.glide_path:
+                        gp_data = {
+                            "start_age": alloc.glide_path.start_age,
+                            "start_weights": alloc.glide_path.start_weights,
+                            "end_age": alloc.glide_path.end_age,
+                            "end_weights": alloc.glide_path.end_weights,
+                        }
+                    alloc_fig = allocation_area_chart(
+                        assets_data,
+                        gp_data,
+                        data["plan_current_age"],
+                        data["plan_end_age"],
+                    )
+                    st.plotly_chart(alloc_fig, use_container_width=True)
 
     # Safe Withdrawal Rate Finder
     st.subheader("Safe Withdrawal Rate Finder")

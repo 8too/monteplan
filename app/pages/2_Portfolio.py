@@ -2,286 +2,451 @@
 
 from __future__ import annotations
 
+import pandas as pd
 import streamlit as st
 
-from monteplan.config.defaults import (
-    ALL_ASSET_NAMES,
-    BOND_ASSET_NAMES,
-    CORRELATION_CONSENSUS,
-    CORRELATION_CRISIS_AWARE,
-    STOCK_ASSET_NAMES,
-    build_global_weights,
-    default_market,
-    default_sim_config,
-)
-from monteplan.config.schema import (
-    AssetClass,
-    GlidePath,
-    MarketAssumptions,
-    RegimeConfig,
-    RegimeSwitchingConfig,
-    SimulationConfig,
-    StressScenario,
-)
+import app.components.charts as app_charts
+import app.components.theme as app_theme
+import monteplan.config.defaults as mp_defaults
+import monteplan.config.schema as mp_schema
 
 st.set_page_config(page_title="Portfolio — MontePlan", layout="wide")
 
-from app.components.theme import register_theme
-
-register_theme()
+app_theme.register_theme()
 
 st.title("Portfolio & Assumptions")
 
 # Initialize defaults
 if "market" not in st.session_state:
-    st.session_state["market"] = default_market()
+    st.session_state["market"] = mp_defaults.default_market()
 if "sim_config" not in st.session_state:
-    st.session_state["sim_config"] = default_sim_config()
+    st.session_state["sim_config"] = mp_defaults.default_sim_config()
 
-market: MarketAssumptions = st.session_state["market"]
-sim_config: SimulationConfig = st.session_state["sim_config"]
+market: mp_schema.MarketAssumptions = st.session_state["market"]
+sim_config: mp_schema.SimulationConfig = st.session_state["sim_config"]
+plan_data: mp_schema.PlanConfig = st.session_state.get("plan", mp_defaults.default_plan())
+
+
+def infer_allocation_settings(alloc: mp_schema.AssetAllocation) -> dict:
+    """Infer UI settings from an AssetAllocation object."""
+    n_assets = len(alloc.assets)
+    if n_assets == 2:
+        preset = "US Only"
+        stock_pct = int(round(alloc.assets[0].weight * 100))
+        stock_us, stock_exus, stock_em = 100, 0, 0
+        bond_us, bond_exus, bond_em = 100, 0, 0
+        same_bond_split = True
+        bond_type = "Aggregate (2% real)"
+    else:
+        stock_weights = [a.weight for a in alloc.assets if "Stock" in a.name]
+        bond_weights = [a.weight for a in alloc.assets if "Bond" in a.name]
+
+        sum_stock = sum(stock_weights)
+        stock_pct = int(round(sum_stock * 100))
+
+        if sum_stock > 1e-6:
+            stock_us = int(round(stock_weights[0] / sum_stock * 100))
+            stock_exus = int(round(stock_weights[1] / sum_stock * 100))
+            stock_em = 100 - stock_us - stock_exus
+        else:
+            stock_us, stock_exus, stock_em = 60, 30, 10
+
+        sum_bond = sum(bond_weights)
+        if sum_bond > 1e-6:
+            bond_us = int(round(bond_weights[0] / sum_bond * 100))
+            bond_exus = int(round(bond_weights[1] / sum_bond * 100))
+            bond_em = 100 - bond_us - bond_exus
+        else:
+            bond_us, bond_exus, bond_em = 60, 30, 10
+
+        same_bond_split = (
+            stock_us == bond_us and stock_exus == bond_exus and stock_em == bond_em
+        )
+
+        # Infer preset
+        is_default_stock = stock_us == 60 and stock_exus == 30 and stock_em == 10
+        is_default_bond = bond_us == 60 and bond_exus == 30 and bond_em == 10
+        if is_default_stock and (same_bond_split or is_default_bond):
+            preset = "Global Diversified"
+        else:
+            preset = "Custom"
+
+        bond_type = "Aggregate (2% real)"
+
+    use_glide = alloc.glide_path is not None
+    gp_start_age = alloc.glide_path.start_age if use_glide else 30
+    gp_end_age = alloc.glide_path.end_age if use_glide else 70
+
+    if use_glide and alloc.glide_path:
+        if n_assets == 6:
+            gp_end_stock = int(round(sum(alloc.glide_path.end_weights[:3]) * 100))
+        else:
+            gp_end_stock = int(round(alloc.glide_path.end_weights[0] * 100))
+    else:
+        gp_end_stock = 40
+
+    return {
+        "preset": preset,
+        "stock_pct": stock_pct,
+        "stock_us": stock_us,
+        "stock_exus": stock_exus,
+        "stock_em": stock_em,
+        "same_bond_split": same_bond_split,
+        "bond_us": bond_us,
+        "bond_exus": bond_exus,
+        "bond_em": bond_em,
+        "bond_type": bond_type,
+        "use_glide": use_glide,
+        "gp_start_age": gp_start_age,
+        "gp_end_age": gp_end_age,
+        "gp_end_stock": gp_end_stock,
+    }
+
+
+if "use_all_accounts" not in st.session_state:
+    st.session_state["use_all_accounts"] = len(market.asset_allocations) == 1
+
+if "alloc_settings" not in st.session_state:
+    # Read from market.asset_allocations
+    if len(market.asset_allocations) == 1:
+        single_settings = infer_allocation_settings(market.asset_allocations[0])
+        st.session_state["alloc_settings"] = {
+            "taxable": dict(single_settings),
+            "traditional": dict(single_settings),
+            "roth": dict(single_settings),
+        }
+    else:
+        default_settings = infer_allocation_settings(market.asset_allocations[0])
+        st.session_state["alloc_settings"] = {
+            "taxable": dict(default_settings),
+            "traditional": dict(default_settings),
+            "roth": dict(default_settings),
+        }
+        if len(market.asset_allocations) == len(plan_data.accounts):
+            for account, alloc in zip(plan_data.accounts, market.asset_allocations):
+                st.session_state["alloc_settings"][account.account_type] = infer_allocation_settings(alloc)
+
+if "selected_account_type" not in st.session_state:
+    st.session_state["selected_account_type"] = "Taxable"
 
 # --- Portfolio Preset ---
 st.subheader("Asset Allocation")
 
-preset = st.radio(
-    "Portfolio Preset",
-    ["Global Diversified", "US Only", "Custom"],
-    index=0,
-    horizontal=True,
-    help="Global: 6-asset US/Ex-US/EM. US Only: 2-asset US Stocks + US Bonds.",
-)
+# Checkbox and Popup Menu
+col_cb, col_pop = st.columns(2)
+with col_cb:
+    use_all_accounts = st.checkbox(
+        "Use for all Accounts",
+        value=st.session_state["use_all_accounts"],
+        key="use_all_accounts_widget",
+    )
+    if use_all_accounts != st.session_state["use_all_accounts"]:
+        st.session_state["use_all_accounts"] = use_all_accounts
+        if not use_all_accounts:
+            taxable_settings = dict(st.session_state["alloc_settings"]["taxable"])
+            st.session_state["alloc_settings"]["traditional"] = dict(taxable_settings)
+            st.session_state["alloc_settings"]["roth"] = dict(taxable_settings)
+        st.rerun()
 
-is_global = preset == "Global Diversified"
-is_custom = preset == "Custom"
-
-
-def _current_stock_pct() -> int:
-    """Infer current stock % from market state."""
-    return int(round(sum(a.weight for a in market.assets if "Stock" in a.name) * 100))
-
-
-def _current_regional(group: str) -> list[int]:
-    """Infer current regional split [US, ExUS, EM] for 'stock' or 'bond' group."""
-    keyword = "Stock" if group == "stock" else "Bond"
-    weights = [a.weight for a in market.assets if keyword in a.name]
-    if len(weights) != 3:
-        return [60, 30, 10]
-    total = sum(weights)
-    if total < 1e-9:
-        return [60, 30, 10]
-    return [int(round(w / total * 100)) for w in weights]
-
-
-# --- Stock / Bond Split ---
-stock_pct = st.slider(
-    "Stocks (%)",
-    min_value=0,
-    max_value=100,
-    value=_current_stock_pct(),
-    step=5,
-)
-bond_pct = 100 - stock_pct
-st.write(f"Bonds: {bond_pct}%")
-
-# --- Regional Splits (only for Global / Custom) ---
-if is_global or is_custom:
-    st.markdown("**Regional Split (Stocks)**")
-    scol1, scol2, scol3 = st.columns(3)
-    cur_stock_reg = _current_regional("stock")
-    with scol1:
-        stock_us = st.number_input(
-            "US (%)",
-            min_value=0,
-            max_value=100,
-            value=cur_stock_reg[0],
-            step=5,
-            key="stock_us",
+active_type = "taxable"
+if not use_all_accounts:
+    with col_pop:
+        selected_account_type = st.selectbox(
+            "Account Type",
+            ["Taxable", "Traditional", "Roth"],
+            index=["Taxable", "Traditional", "Roth"].index(
+                st.session_state["selected_account_type"]
+            ),
+            key="account_type_widget",
         )
-    with scol2:
-        stock_exus = st.number_input(
-            "Ex-US Dev (%)",
-            min_value=0,
-            max_value=100,
-            value=cur_stock_reg[1],
-            step=5,
-            key="stock_exus",
-        )
-    with scol3:
-        stock_em = st.number_input(
-            "EM (%)",
-            min_value=0,
-            max_value=100,
-            value=cur_stock_reg[2],
-            step=5,
-            key="stock_em",
-        )
-    stock_reg_sum = stock_us + stock_exus + stock_em
-    if stock_reg_sum != 100:
-        st.warning(f"Stock regional split sums to {stock_reg_sum}%, must be 100%.")
+        if selected_account_type != st.session_state["selected_account_type"]:
+            st.session_state["selected_account_type"] = selected_account_type
+            st.rerun()
+    active_type = st.session_state["selected_account_type"].lower()
 
-    same_bond_split = st.checkbox("Same regional split for bonds", value=True)
-    if same_bond_split:
-        bond_us, bond_exus, bond_em = stock_us, stock_exus, stock_em
-    else:
-        st.markdown("**Regional Split (Bonds)**")
-        bcol1, bcol2, bcol3 = st.columns(3)
-        cur_bond_reg = _current_regional("bond")
-        with bcol1:
-            bond_us = st.number_input(
+settings = st.session_state["alloc_settings"][active_type]
+
+
+def render_allocation_section(active_type: str, settings: dict):
+    preset = st.radio(
+        "Portfolio Preset",
+        ["Global Diversified", "US Only", "Custom"],
+        index=["Global Diversified", "US Only", "Custom"].index(settings["preset"]),
+        horizontal=True,
+        key=f"preset_{active_type}",
+        help="Global: 6-asset US/Ex-US/EM. US Only: 2-asset US Stocks + US Bonds.",
+    )
+    settings["preset"] = preset
+
+    is_global = preset == "Global Diversified"
+    is_custom = preset == "Custom"
+
+    stock_pct = st.slider(
+        "Stocks (%)",
+        min_value=0,
+        max_value=100,
+        value=settings["stock_pct"],
+        step=5,
+        key=f"stock_pct_{active_type}",
+    )
+    settings["stock_pct"] = stock_pct
+    bond_pct = 100 - stock_pct
+    st.write(f"Bonds: {bond_pct}%")
+
+    stock_us, stock_exus, stock_em = (
+        settings["stock_us"],
+        settings["stock_exus"],
+        settings["stock_em"],
+    )
+    bond_us, bond_exus, bond_em = settings["bond_us"], settings["bond_exus"], settings["bond_em"]
+    same_bond_split = settings["same_bond_split"]
+
+    if is_global or is_custom:
+        st.markdown("**Regional Split (Stocks)**")
+        scol1, scol2, scol3 = st.columns(3)
+        with scol1:
+            stock_us = st.number_input(
                 "US (%)",
                 min_value=0,
                 max_value=100,
-                value=cur_bond_reg[0],
+                value=stock_us,
                 step=5,
-                key="bond_us",
+                key=f"stock_us_{active_type}",
             )
-        with bcol2:
-            bond_exus = st.number_input(
+        with scol2:
+            stock_exus = st.number_input(
                 "Ex-US Dev (%)",
                 min_value=0,
                 max_value=100,
-                value=cur_bond_reg[1],
+                value=stock_exus,
                 step=5,
-                key="bond_exus",
+                key=f"stock_exus_{active_type}",
             )
-        with bcol3:
-            bond_em = st.number_input(
+        with scol3:
+            stock_em = st.number_input(
                 "EM (%)",
                 min_value=0,
                 max_value=100,
-                value=cur_bond_reg[2],
+                value=stock_em,
                 step=5,
-                key="bond_em",
+                key=f"stock_em_{active_type}",
             )
-        bond_reg_sum = bond_us + bond_exus + bond_em
-        if bond_reg_sum != 100:
-            st.warning(f"Bond regional split sums to {bond_reg_sum}%, must be 100%.")
+        settings["stock_us"] = stock_us
+        settings["stock_exus"] = stock_exus
+        settings["stock_em"] = stock_em
+        stock_reg_sum = stock_us + stock_exus + stock_em
+        if stock_reg_sum != 100:
+            st.warning(f"Stock regional split sums to {stock_reg_sum}%, must be 100%.")
 
-    stock_regional = [stock_us / 100, stock_exus / 100, stock_em / 100]
-    bond_regional = [bond_us / 100, bond_exus / 100, bond_em / 100]
-
-    # --- Bond Type ---
-    bond_type = st.radio(
-        "Bond Type",
-        ["Aggregate (2% real)", "Treasuries Only (1.5% real)"],
-        index=0,
-        horizontal=True,
-    )
-    bond_type_key = "treasuries" if "Treasuries" in bond_type else "aggregate"
-
-    # --- Computed Weights Display ---
-    computed_weights = build_global_weights(
-        stock_pct=stock_pct / 100,
-        stock_regional=stock_regional,
-        bond_regional=bond_regional,
-    )
-    st.markdown("**Computed Weights**")
-    wcol1, wcol2 = st.columns(2)
-    with wcol1:
-        for i, name in enumerate(STOCK_ASSET_NAMES):
-            st.write(f"{name}: {computed_weights[i]:.0%}")
-    with wcol2:
-        for i, name in enumerate(BOND_ASSET_NAMES):
-            st.write(f"{name}: {computed_weights[i + 3]:.0%}")
-
-    n_assets = 6
-    asset_names = list(ALL_ASSET_NAMES)
-    asset_weights = computed_weights
-
-else:
-    # US Only — simple 2-asset
-    bond_type_key = "aggregate"
-    n_assets = 2
-    asset_names = ["US Stocks", "US Bonds"]
-    asset_weights = [stock_pct / 100, bond_pct / 100]
-
-# --- Glide Path ---
-use_glide = st.checkbox(
-    "Enable Glide Path (age-based allocation shift)",
-    value=market.glide_path is not None,
-)
-gp_start_age = 30
-gp_end_age = 70
-gp_end_stock = 40
-if use_glide:
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        gp_start_age = st.number_input(
-            "Glide Start Age",
-            min_value=18,
-            max_value=120,
-            value=market.glide_path.start_age if market.glide_path else 30,
+        same_bond_split = st.checkbox(
+            "Same regional split for bonds",
+            value=same_bond_split,
+            key=f"same_bond_split_{active_type}",
         )
-    with col2:
-        gp_end_age = st.number_input(
-            "Glide End Age",
-            min_value=gp_start_age + 1,
-            max_value=120,
-            value=market.glide_path.end_age if market.glide_path else 70,
-        )
-    with col3:
-        gp_end_stock = st.slider(
-            "End Stock Allocation (%)",
-            min_value=0,
-            max_value=100,
-            step=5,
-            value=int(
-                sum(
-                    market.glide_path.end_weights[i]
-                    for i in range(len(market.glide_path.end_weights))
-                    if i < len(market.assets) and "Stock" in market.assets[i].name
+        settings["same_bond_split"] = same_bond_split
+        if same_bond_split:
+            bond_us, bond_exus, bond_em = stock_us, stock_exus, stock_em
+        else:
+            st.markdown("**Regional Split (Bonds)**")
+            bcol1, bcol2, bcol3 = st.columns(3)
+            with bcol1:
+                bond_us = st.number_input(
+                    "US (%)",
+                    min_value=0,
+                    max_value=100,
+                    value=bond_us,
+                    step=5,
+                    key=f"bond_us_{active_type}",
                 )
-                * 100
-            )
-            if market.glide_path
-            else 40,
+            with bcol2:
+                bond_exus = st.number_input(
+                    "Ex-US Dev (%)",
+                    min_value=0,
+                    max_value=100,
+                    value=bond_exus,
+                    step=5,
+                    key=f"bond_exus_{active_type}",
+                )
+            with bcol3:
+                bond_em = st.number_input(
+                    "EM (%)",
+                    min_value=0,
+                    max_value=100,
+                    value=bond_em,
+                    step=5,
+                    key=f"bond_em_{active_type}",
+                )
+            bond_reg_sum = bond_us + bond_exus + bond_em
+            if bond_reg_sum != 100:
+                st.warning(f"Bond regional split sums to {bond_reg_sum}%, must be 100%.")
+        settings["bond_us"] = bond_us
+        settings["bond_exus"] = bond_exus
+        settings["bond_em"] = bond_em
+
+        stock_regional = [stock_us / 100, stock_exus / 100, stock_em / 100]
+        bond_regional = [bond_us / 100, bond_exus / 100, bond_em / 100]
+
+        # --- Bond Type ---
+        bond_type = st.radio(
+            "Bond Type",
+            ["Aggregate (2% real)", "Treasuries Only (1.5% real)"],
+            index=0 if "Aggregate" in settings["bond_type"] else 1,
+            horizontal=True,
+            key=f"bond_type_{active_type}",
         )
-    st.caption(
-        f"Allocation shifts from {stock_pct}% stocks at age {gp_start_age} "
-        f"to {gp_end_stock}% stocks at age {gp_end_age}"
+        settings["bond_type"] = bond_type
+        bond_type_key = "treasuries" if "Treasuries" in bond_type else "aggregate"
+
+        # --- Computed Weights Display ---
+        computed_weights = mp_defaults.build_global_weights(
+            stock_pct=stock_pct / 100,
+            stock_regional=stock_regional,
+            bond_regional=bond_regional,
+        )
+        st.markdown("**Computed Weights**")
+        wcol1, wcol2 = st.columns(2)
+        with wcol1:
+            for i, name in enumerate(mp_defaults.STOCK_ASSET_NAMES):
+                st.write(f"{name}: {computed_weights[i]:.0%}")
+        with wcol2:
+            for i, name in enumerate(mp_defaults.BOND_ASSET_NAMES):
+                st.write(f"{name}: {computed_weights[i + 3]:.0%}")
+
+        n_assets = 6
+        asset_names = list(mp_defaults.ALL_ASSET_NAMES)
+        asset_weights = computed_weights
+
+    else:
+        # US Only — simple 2-asset
+        bond_type_key = "aggregate"
+        n_assets = 2
+        asset_names = ["US Stocks", "US Bonds"]
+        asset_weights = [stock_pct / 100, bond_pct / 100]
+        stock_regional = None
+        bond_regional = None
+
+    # --- Glide Path ---
+    use_glide = st.checkbox(
+        "Enable Glide Path (age-based allocation shift)",
+        value=settings["use_glide"],
+        key=f"use_glide_{active_type}",
+    )
+    settings["use_glide"] = use_glide
+
+    gp_start_age = settings["gp_start_age"]
+    gp_end_age = settings["gp_end_age"]
+    gp_end_stock = settings["gp_end_stock"]
+
+    if use_glide:
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            gp_start_age = st.number_input(
+                "Glide Start Age",
+                min_value=18,
+                max_value=120,
+                value=gp_start_age,
+                key=f"gp_start_age_{active_type}",
+            )
+        with col2:
+            gp_end_age = st.number_input(
+                "Glide End Age",
+                min_value=gp_start_age + 1,
+                max_value=120,
+                value=max(gp_end_age, gp_start_age + 1),
+                key=f"gp_end_age_{active_type}",
+            )
+        with col3:
+            gp_end_stock = st.slider(
+                "End Stock Allocation (%)",
+                min_value=0,
+                max_value=100,
+                step=5,
+                value=gp_end_stock,
+                key=f"gp_end_stock_{active_type}",
+            )
+        st.caption(
+            f"Allocation shifts from {stock_pct}% stocks at age {gp_start_age} "
+            f"to {gp_end_stock}% stocks at age {gp_end_age}"
+        )
+    settings["gp_start_age"] = gp_start_age
+    settings["gp_end_age"] = gp_end_age
+    settings["gp_end_stock"] = gp_end_stock
+
+    # --- Allocation area chart preview ---
+    _preview_current_age = plan_data.current_age if plan_data else 30
+    _preview_end_age = plan_data.end_age if plan_data else 90
+    _preview_assets = [
+        {"name": asset_names[i], "weight": asset_weights[i]} for i in range(n_assets)
+    ]
+    _preview_gp = None
+    if use_glide:
+        if n_assets == 6:
+            end_weights = mp_defaults.build_global_weights(
+                stock_pct=gp_end_stock / 100,
+                stock_regional=stock_regional,
+                bond_regional=bond_regional,
+            )
+        else:
+            end_weights = [gp_end_stock / 100, (100 - gp_end_stock) / 100]
+        _preview_gp = {
+            "start_age": gp_start_age,
+            "start_weights": list(asset_weights),
+            "end_age": gp_end_age,
+            "end_weights": end_weights,
+        }
+    _alloc_fig = app_charts.allocation_area_chart(
+        _preview_assets,
+        _preview_gp,
+        _preview_current_age,
+        _preview_end_age,
+    )
+    st.plotly_chart(_alloc_fig, use_container_width=True)
+
+    return (
+        n_assets,
+        asset_names,
+        asset_weights,
+        bond_type_key,
+        preset,
+        stock_regional,
+        bond_regional,
     )
 
-# --- Allocation area chart preview ---
-from app.components.charts import allocation_area_chart
 
-plan_data = st.session_state.get("plan")
-_preview_current_age = plan_data.current_age if plan_data else 30
-_preview_end_age = plan_data.end_age if plan_data else 90
-_preview_assets = [{"name": asset_names[i], "weight": asset_weights[i]} for i in range(n_assets)]
-_preview_gp = None
-if use_glide:
-    if n_assets == 6:
-        # Build end weights preserving regional ratios
-        end_weights = build_global_weights(
-            stock_pct=gp_end_stock / 100,
-            stock_regional=stock_regional if (is_global or is_custom) else None,
-            bond_regional=bond_regional if (is_global or is_custom) else None,
-        )
-    else:
-        end_weights = [gp_end_stock / 100, (100 - gp_end_stock) / 100]
-    _preview_gp = {
-        "start_age": gp_start_age,
-        "start_weights": list(asset_weights),
-        "end_age": gp_end_age,
-        "end_weights": end_weights,
-    }
-_alloc_fig = allocation_area_chart(
-    _preview_assets,
-    _preview_gp,
-    _preview_current_age,
-    _preview_end_age,
-)
-st.plotly_chart(_alloc_fig, use_container_width=True)
+if use_all_accounts:
+    (
+        n_assets,
+        asset_names,
+        asset_weights,
+        bond_type_key,
+        preset,
+        stock_regional,
+        bond_regional,
+    ) = render_allocation_section(active_type, settings)
+else:
+    with st.container(border=True):
+        st.subheader(f"Asset Allocation for {st.session_state['selected_account_type']} Accounts")
+        (
+            n_assets,
+            asset_names,
+            asset_weights,
+            bond_type_key,
+            preset,
+            stock_regional,
+            bond_regional,
+        ) = render_allocation_section(active_type, settings)
+
+current_assets_count = len(market.asset_allocations[0].assets)
+
 
 # --- Market Assumptions ---
 with st.expander("Market Assumptions", expanded=False):
     if n_assets == 6:
         # Get reference market for default return/vol values
-        ref_market = default_market(bond_type=bond_type_key)
+        ref_market = mp_defaults.default_market(bond_type=bond_type_key)
 
         # Use current market values if asset count matches, otherwise use reference
-        use_current = len(market.assets) == 6
+        use_current = current_assets_count == 6
 
         st.markdown("**Expected Returns (%/yr)**")
         ret_cols = st.columns(3)
@@ -294,7 +459,7 @@ with st.expander("Market Assumptions", expanded=False):
                     else ref_market.expected_annual_returns[i] * 100
                 )
                 val = st.number_input(
-                    f"{ALL_ASSET_NAMES[i]}",
+                    f"{mp_defaults.ALL_ASSET_NAMES[i]}",
                     value=default_val,
                     step=0.5,
                     key=f"ret_{i}",
@@ -312,7 +477,7 @@ with st.expander("Market Assumptions", expanded=False):
                     else ref_market.annual_volatilities[i] * 100
                 )
                 val = st.number_input(
-                    f"{ALL_ASSET_NAMES[i]}",
+                    f"{mp_defaults.ALL_ASSET_NAMES[i]}",
                     value=default_val,
                     step=0.5,
                     key=f"vol_{i}",
@@ -328,24 +493,22 @@ with st.expander("Market Assumptions", expanded=False):
             horizontal=True,
         )
         if corr_preset == "Academic Consensus":
-            correlation_matrix = [list(row) for row in CORRELATION_CONSENSUS]
+            correlation_matrix = [list(row) for row in mp_defaults.CORRELATION_CONSENSUS]
         elif corr_preset == "Crisis-Aware":
-            correlation_matrix = [list(row) for row in CORRELATION_CRISIS_AWARE]
+            correlation_matrix = [list(row) for row in mp_defaults.CORRELATION_CRISIS_AWARE]
         else:
-            import pandas as pd
-
             # Editable correlation matrix
             if use_current and len(market.correlation_matrix) == 6:
                 corr_df = pd.DataFrame(
                     market.correlation_matrix,
-                    index=ALL_ASSET_NAMES,
-                    columns=ALL_ASSET_NAMES,
+                    index=mp_defaults.ALL_ASSET_NAMES,
+                    columns=mp_defaults.ALL_ASSET_NAMES,
                 )
             else:
                 corr_df = pd.DataFrame(
-                    CORRELATION_CONSENSUS,
-                    index=ALL_ASSET_NAMES,
-                    columns=ALL_ASSET_NAMES,
+                    mp_defaults.CORRELATION_CONSENSUS,
+                    index=mp_defaults.ALL_ASSET_NAMES,
+                    columns=mp_defaults.ALL_ASSET_NAMES,
                 )
             edited_corr = st.data_editor(corr_df, key="corr_editor")
             correlation_matrix = edited_corr.values.tolist()
@@ -356,23 +519,23 @@ with st.expander("Market Assumptions", expanded=False):
         with col1:
             stock_return = st.number_input(
                 "Expected Stock Return (%/yr)",
-                value=market.expected_annual_returns[0] * 100 if len(market.assets) == 2 else 8.0,
+                value=market.expected_annual_returns[0] * 100 if current_assets_count == 2 else 8.0,
                 step=0.5,
             )
             stock_vol = st.number_input(
                 "Stock Volatility (%/yr)",
-                value=market.annual_volatilities[0] * 100 if len(market.assets) == 2 else 16.0,
+                value=market.annual_volatilities[0] * 100 if current_assets_count == 2 else 16.0,
                 step=1.0,
             )
         with col2:
             bond_return = st.number_input(
                 "Expected Bond Return (%/yr)",
-                value=market.expected_annual_returns[1] * 100 if len(market.assets) == 2 else 5.0,
+                value=market.expected_annual_returns[1] * 100 if current_assets_count == 2 else 5.0,
                 step=0.5,
             )
             bond_vol = st.number_input(
                 "Bond Volatility (%/yr)",
-                value=market.annual_volatilities[1] * 100 if len(market.assets) == 2 else 7.0,
+                value=market.annual_volatilities[1] * 100 if current_assets_count == 2 else 7.0,
                 step=0.5,
             )
         returns_input = [stock_return, bond_return]
@@ -382,7 +545,7 @@ with st.expander("Market Assumptions", expanded=False):
             "Stock-Bond Correlation",
             min_value=-1.0,
             max_value=1.0,
-            value=market.correlation_matrix[0][1] if len(market.assets) == 2 else 0.0,
+            value=market.correlation_matrix[0][1] if current_assets_count == 2 else 0.0,
             step=0.1,
         )
         correlation_matrix = [
@@ -522,7 +685,7 @@ if return_model == "regime_switching":
             },
         ]
 
-    regimes: list[RegimeConfig] = []
+    regimes: list[mp_schema.RegimeConfig] = []
     for ri in range(n_regimes):
         d = regime_defaults[ri]
         with st.expander(f"Regime {ri + 1}: {d['name']}", expanded=ri == 0):
@@ -537,14 +700,14 @@ if return_model == "regime_switching":
                 for ai in range(3):
                     with [sc1, sc2, sc3][ai]:
                         rv = st.number_input(
-                            f"{STOCK_ASSET_NAMES[ai]} Ret (%)",
+                            f"{mp_defaults.STOCK_ASSET_NAMES[ai]} Ret (%)",
                             value=d["returns"][ai],
                             step=1.0,
                             key=f"r_ret_{ri}_{ai}",
                         )
                         r_returns.append(rv)
                         vv = st.number_input(
-                            f"{STOCK_ASSET_NAMES[ai]} Vol (%)",
+                            f"{mp_defaults.STOCK_ASSET_NAMES[ai]} Vol (%)",
                             value=d["vols"][ai],
                             step=1.0,
                             key=f"r_vol_{ri}_{ai}",
@@ -555,14 +718,14 @@ if return_model == "regime_switching":
                 for ai in range(3):
                     with [bc1, bc2, bc3][ai]:
                         rv = st.number_input(
-                            f"{BOND_ASSET_NAMES[ai]} Ret (%)",
+                            f"{mp_defaults.BOND_ASSET_NAMES[ai]} Ret (%)",
                             value=d["returns"][ai + 3],
                             step=0.5,
                             key=f"r_ret_{ri}_{ai + 3}",
                         )
                         r_returns.append(rv)
                         vv = st.number_input(
-                            f"{BOND_ASSET_NAMES[ai]} Vol (%)",
+                            f"{mp_defaults.BOND_ASSET_NAMES[ai]} Vol (%)",
                             value=d["vols"][ai + 3],
                             step=0.5,
                             key=f"r_vol_{ri}_{ai + 3}",
@@ -600,7 +763,7 @@ if return_model == "regime_switching":
             regime_corr = correlation_matrix
 
             regimes.append(
-                RegimeConfig(
+                mp_schema.RegimeConfig(
                     name=r_name,
                     expected_annual_returns=[r / 100 for r in r_returns],
                     annual_volatilities=[v / 100 for v in r_vols],
@@ -633,7 +796,7 @@ if return_model == "regime_switching":
                 row.append(val)
         transition_matrix.append(row)
 
-    regime_switching_config = RegimeSwitchingConfig(
+    regime_switching_config = mp_schema.RegimeSwitchingConfig(
         regimes=regimes,
         transition_matrix=transition_matrix,
         initial_regime=1 if n_regimes == 3 else 0,
@@ -651,7 +814,7 @@ stress_options = {
 }
 
 existing_scenarios = {s.scenario_type: s for s in sim_config.stress_scenarios}
-selected_scenarios: list[StressScenario] = []
+selected_scenarios: list[mp_schema.StressScenario] = []
 
 for stype, label in stress_options.items():
     existing = existing_scenarios.get(stype)
@@ -685,7 +848,7 @@ for stype, label in stress_options.items():
                 key=f"stress_sev_{stype}",
             )
         selected_scenarios.append(
-            StressScenario(
+            mp_schema.StressScenario(
                 name=stype,
                 scenario_type=stype,
                 start_age=s_age,
@@ -710,31 +873,61 @@ seed = st.number_input("Random Seed", value=sim_config.seed, min_value=0)
 # --- Save ---
 if st.button("Save Portfolio & Settings", type="primary"):
     try:
-        # Build asset list
-        assets = [
-            AssetClass(name=asset_names[i], weight=asset_weights[i]) for i in range(n_assets)
-        ]
-
-        # Build glide path weights
-        glide_path: GlidePath | None = None
-        if use_glide:
-            if n_assets == 6:
-                end_wts = build_global_weights(
-                    stock_pct=gp_end_stock / 100,
-                    stock_regional=stock_regional if (is_global or is_custom) else None,
-                    bond_regional=bond_regional if (is_global or is_custom) else None,
+        # Build allocations
+        def build_alloc(s: dict) -> mp_schema.AssetAllocation:
+            p = s["preset"]
+            s_pct = s["stock_pct"]
+            if p in ("Global Diversified", "Custom"):
+                s_reg = [s["stock_us"] / 100, s["stock_exus"] / 100, s["stock_em"] / 100]
+                b_reg = [s["bond_us"] / 100, s["bond_exus"] / 100, s["bond_em"] / 100]
+                wts = mp_defaults.build_global_weights(
+                    stock_pct=s_pct / 100,
+                    stock_regional=s_reg,
+                    bond_regional=b_reg,
                 )
+                assets = [mp_schema.AssetClass(name=name, weight=w) for name, w in zip(mp_defaults.ALL_ASSET_NAMES, wts)]
             else:
-                end_wts = [gp_end_stock / 100, (100 - gp_end_stock) / 100]
-            glide_path = GlidePath(
-                start_age=int(gp_start_age),
-                start_weights=list(asset_weights),
-                end_age=int(gp_end_age),
-                end_weights=end_wts,
-            )
+                assets = [
+                    mp_schema.AssetClass(name="US Stocks", weight=s_pct / 100),
+                    mp_schema.AssetClass(name="US Bonds", weight=(100 - s_pct) / 100),
+                ]
+            
+            gl_path = None
+            if s["use_glide"]:
+                if len(assets) == 6:
+                    end_wts = mp_defaults.build_global_weights(
+                        stock_pct=s["gp_end_stock"] / 100,
+                        stock_regional=s_reg if p in ("Global Diversified", "Custom") else None,
+                        bond_regional=b_reg if p in ("Global Diversified", "Custom") else None,
+                    )
+                else:
+                    end_wts = [s["gp_end_stock"] / 100, (100 - s["gp_end_stock"]) / 100]
+                gl_path = mp_schema.GlidePath(
+                    start_age=int(s["gp_start_age"]),
+                    start_weights=[a.weight for a in assets],
+                    end_age=int(s["gp_end_age"]),
+                    end_weights=end_wts,
+                )
+            return mp_schema.AssetAllocation(assets=assets, glide_path=gl_path)
 
-        new_market = MarketAssumptions(
-            assets=assets,
+        if use_all_accounts:
+            allocs = [build_alloc(st.session_state["alloc_settings"]["taxable"])]
+        else:
+            # We must output exactly len(plan_data.accounts) asset allocations
+            allocs = []
+            for account in plan_data.accounts:
+                acct_type = account.account_type.lower()
+                s = st.session_state["alloc_settings"].get(acct_type, st.session_state["alloc_settings"]["taxable"])
+                allocs.append(build_alloc(s))
+
+        # Check that all allocations have the same number of assets
+        num_assets_list = [len(alloc.assets) for alloc in allocs]
+        if len(set(num_assets_list)) > 1:
+            st.error("All accounts must use the same number of assets (either all 6-asset or all 2-asset configurations).")
+            st.stop()
+
+        new_market = mp_schema.MarketAssumptions(
+            asset_allocations=allocs,
             expected_annual_returns=[r / 100 for r in returns_input],
             annual_volatilities=[v / 100 for v in vols_input],
             correlation_matrix=[list(row) for row in correlation_matrix],
@@ -748,9 +941,8 @@ if st.button("Save Portfolio & Settings", type="primary"):
             regime_switching=regime_switching_config
             if return_model == "regime_switching"
             else None,
-            glide_path=glide_path,
         )
-        new_sim = SimulationConfig(
+        new_sim = mp_schema.SimulationConfig(
             seed=int(seed),
             preset=sim_preset_key,
             stress_scenarios=selected_scenarios,
