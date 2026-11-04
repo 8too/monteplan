@@ -188,7 +188,7 @@ def test_multiple_income_streams():
 def _inflation_only_market(inflation: float = 0.03):
     """Zero real return, fixed inflation: withdrawals are the only thing moving wealth."""
     return MarketAssumptions(
-        assets=[AssetClass(name="Cash", weight=1.0)],
+        asset_allocations=[AssetAllocation(assets=[AssetClass(name="Cash", weight=1.0)])],
         expected_annual_returns=[0.0],
         annual_volatilities=[0.0001],
         correlation_matrix=[[1.0]],
