@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from monteplan.config.schema import (
     AccountConfig,
@@ -15,6 +16,19 @@ from monteplan.config.schema import (
 )
 from monteplan.core.engine import simulate
 from monteplan.taxes.rmd import RMDCalculator
+from monteplan.taxes.us_federal import USFederalTaxModel
+
+
+def _fixed_market() -> MarketAssumptions:
+    """No returns and no inflation, so every path is the same."""
+    return MarketAssumptions(
+        asset_allocations=[AssetAllocation(assets=[AssetClass(name="Stocks", weight=1.0)])],
+        expected_annual_returns=[0.0],
+        annual_volatilities=[0.0],
+        correlation_matrix=[[1.0]],
+        inflation_mean=0.0,
+        inflation_vol=0.0,
+    )
 
 
 class TestRMDCalculator:
@@ -91,3 +105,70 @@ class TestRMDEngineIntegration:
         # With RMDs + taxes, should be noticeably lower
         median_terminal = float(np.median(result.all_paths[:, -1]))
         assert median_terminal < 1_900_000  # RMDs + taxes took a chunk
+
+
+class TestRMDDistribution:
+    """One year at 75 with no spending: the whole RMD is distributed and reinvested."""
+
+    RMD = 1_000_000 / 24.6  # Uniform Lifetime Table divisor at 75
+
+    @staticmethod
+    def _terminal_wealth(tax_model: str, accounts: list[AccountConfig]) -> float:
+        plan = PlanConfig(
+            current_age=75, retirement_age=75, end_age=76, monthly_spending=0, accounts=accounts
+        )
+        market = _fixed_market()
+        if len(accounts) > 1:
+            market = market.model_copy(
+                update={"asset_allocations": market.asset_allocations * len(accounts)}
+            )
+        result = simulate(
+            plan,
+            market,
+            PolicyBundle(tax_model=tax_model),  # type: ignore[arg-type]
+            SimulationConfig(n_paths=4),
+        )
+        return result.terminal_wealth_percentiles["p50"]
+
+    def test_reinvested_net_of_flat_tax(self) -> None:
+        """Also checks that the first year's RMD uses the starting balance."""
+        wealth = self._terminal_wealth(
+            "flat", [AccountConfig(account_type="traditional", balance=1e6)]
+        )
+        assert wealth == pytest.approx(1e6 - 0.22 * self.RMD)
+
+    def test_reinvested_and_taxed_at_year_end_under_us_federal(self) -> None:
+        wealth = self._terminal_wealth(
+            "us_federal", [AccountConfig(account_type="traditional", balance=1e6)]
+        )
+        tax = USFederalTaxModel().compute_annual_tax(self.RMD, 0, "single")
+        assert wealth == pytest.approx(1e6 - tax)
+
+    def test_reinvested_in_existing_taxable_account(self) -> None:
+        wealth = self._terminal_wealth(
+            "flat",
+            [
+                AccountConfig(account_type="traditional", balance=1e6),
+                AccountConfig(account_type="taxable", balance=1e5),
+            ],
+        )
+        assert wealth == pytest.approx(1.1e6 - 0.22 * self.RMD)
+
+    def test_rmds_recur_every_year_under_flat_tax(self) -> None:
+        plan = PlanConfig(
+            current_age=75,
+            retirement_age=75,
+            end_age=78,
+            monthly_spending=0,
+            accounts=[AccountConfig(account_type="traditional", balance=1e6)],
+        )
+        result = simulate(
+            plan,
+            _fixed_market(),
+            PolicyBundle(tax_model="flat"),
+            SimulationConfig(n_paths=4, store_paths=True),
+        )
+        assert result.all_paths is not None
+        year_end_wealth = result.all_paths[0, [0, 12, 24, 36]]
+        # Each year loses the flat tax on that year's RMD.
+        assert np.all(np.diff(year_end_wealth) < -1_000)

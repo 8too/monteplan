@@ -10,6 +10,7 @@ import numpy.typing as npt
 
 from monteplan import __version__
 from monteplan.config.schema import (
+    AccountConfig,
     MarketAssumptions,
     PlanConfig,
     PolicyBundle,
@@ -36,6 +37,13 @@ from monteplan.policies.withdrawals import withdraw
 from monteplan.taxes.rmd import RMDCalculator
 from monteplan.taxes.simple import FlatTaxModel
 from monteplan.taxes.us_federal import USFederalTaxModel
+
+
+def _traditional_balance(state: SimulationState) -> npt.NDArray[np.floating[Any]]:
+    """Total traditional balance per path, shape (n_paths,)."""
+    indices = [i for i, tp in enumerate(state.account_types) if tp == "traditional"]
+    result: npt.NDArray[np.floating[Any]] = state.balances[:, indices].sum(axis=1)
+    return result
 
 
 @dataclass
@@ -162,6 +170,16 @@ def simulate(
     elif len(allocations) != n_accounts:
         raise ValueError(f"Expected {n_accounts} or 1 asset allocations, got {len(allocations)}")
 
+    # RMDs beyond the spending need are reinvested in the first taxable account. A plan
+    # without one gets an empty taxable account for them, invested like its first
+    # traditional account.
+    accounts = list(plan.accounts)
+    plan_account_types = [a.account_type for a in accounts]
+    if "traditional" in plan_account_types and "taxable" not in plan_account_types:
+        accounts.append(AccountConfig(account_type="taxable", balance=0.0))
+        allocations = [*allocations, allocations[plan_account_types.index("traditional")]]
+        n_accounts += 1
+
     static_weights = np.zeros((n_accounts, len(allocations[0].assets)))
     for i, alloc in enumerate(allocations):
         static_weights[i, :] = [a.weight for a in alloc.assets]
@@ -175,15 +193,17 @@ def simulate(
     weights = static_weights.copy()
 
     # Initialize state with per-asset-per-account positions
-    initial_balances = [a.balance for a in plan.accounts]
-    account_types: list[str] = [a.account_type for a in plan.accounts]
+    initial_balances = [a.balance for a in accounts]
+    account_types: list[str] = [a.account_type for a in accounts]
     state = SimulationState.initialize(n_paths, initial_balances, account_types, weights)
     state.initial_portfolio_value = state.total_wealth.copy()
-    ledger = LotLedger(n_paths, plan.accounts, policies.lot_selection)
+    # The starting balance stands in for the prior year-end balance of the first year's RMD
+    state.prior_year_traditional_balance = _traditional_balance(state)
+    ledger = LotLedger(n_paths, accounts, policies.lot_selection)
 
     # Prepare policies
     monthly_contributions = compute_monthly_contributions(
-        [a.annual_contribution for a in plan.accounts]
+        [a.annual_contribution for a in accounts]
     )
 
     spending_policy: (
@@ -341,12 +361,17 @@ def simulate(
                     )
             else:
                 # Outflow: withdraw pro-rata across accounts
+                trad_before = _traditional_balance(state)
                 withdraw(
                     state,
                     np.full(n_paths, -event_amount),
                     list(policies.withdrawal_order),
                     effective_tax_rate,
                 )
+                # Traditional withdrawals are ordinary income and count toward the RMD
+                trad_withdrawn = np.maximum(trad_before - _traditional_balance(state), 0.0)
+                state.annual_ordinary_income += trad_withdrawn
+                state.annual_rmd_satisfied += trad_withdrawn
             ledger.record_flows(state, balances_before, t)
 
         # 5. Rebalancing (calendar or threshold-based)
@@ -423,6 +448,7 @@ def simulate(
                 mask = rmd_shortfall > 0
                 if mask.any():
                     # Force withdraw from traditional only
+                    rmd_distributed = np.zeros(n_paths)
                     for idx in trad_indices:
                         available = state.positions[:, idx, :].sum(axis=1)
                         force_withdraw = np.minimum(rmd_shortfall, available)
@@ -432,6 +458,17 @@ def simulate(
                         state.positions[:, idx, :] *= 1.0 - frac_arr[:, np.newaxis]
                         state.annual_ordinary_income += force_withdraw
                         rmd_shortfall -= force_withdraw
+                        rmd_distributed += force_withdraw
+
+                    # Reinvest the distribution, net of the tax withheld under the flat model
+                    balances_before = ledger.snapshot(state)
+                    reinvest_idx = state.account_types.index("taxable")
+                    state.positions[:, reinvest_idx, :] += (
+                        rmd_distributed[:, np.newaxis]
+                        * (1.0 - effective_tax_rate)
+                        * current_weights[reinvest_idx][np.newaxis, :]
+                    )
+                    ledger.record_flows(state, balances_before, t)
 
         # Add the year's realized capital gains to the annual income
         if month == 12:
@@ -509,21 +546,16 @@ def simulate(
             tax_frac = np.minimum(annual_tax / safe_total, 1.0)
             balances_before = ledger.snapshot(state)
             state.positions *= 1.0 - tax_frac[:, np.newaxis, np.newaxis]
-            # Snapshot traditional balance for next year's RMD
-            trad_indices_yr = [
-                i for i, tp in enumerate(state.account_types) if tp == "traditional"
-            ]
-            if trad_indices_yr:
-                state.prior_year_traditional_balance = state.balances[:, trad_indices_yr].sum(
-                    axis=1
-                )
+            # Selling to pay the tax realizes gains of the following tax year
+            ledger.record_flows(state, balances_before, t)
 
-            # Reset annual accumulators
+        # Year end for all tax models: snapshot the traditional balance for next year's RMD
+        # and reset the annual accumulators
+        if month == 12:
+            state.prior_year_traditional_balance = _traditional_balance(state)
             state.annual_ordinary_income[:] = 0.0
             state.annual_ltcg[:] = 0.0
             state.annual_rmd_satisfied[:] = 0.0
-            # Selling to pay the tax realizes gains of the following tax year
-            ledger.record_flows(state, balances_before, t)
 
         # 8. Update depletion status
         state.is_depleted = state.total_wealth <= 0.0

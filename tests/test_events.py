@@ -136,3 +136,57 @@ class TestDiscreteEvents:
 
         with pytest.raises(ValueError):
             DiscreteEvent(age=10, amount=100)  # age < 18
+
+
+class TestOutflowIncome:
+    def test_traditional_outflow_is_taxed_as_ordinary_income(self) -> None:
+        from monteplan.taxes.us_federal import USFederalTaxModel
+
+        plan = PlanConfig(
+            current_age=60,
+            retirement_age=60,
+            end_age=61,
+            monthly_spending=0,
+            accounts=[AccountConfig(account_type="traditional", balance=1e6)],
+            discrete_events=[DiscreteEvent(age=60.5, amount=-48_000)],
+        )
+        market = MarketAssumptions(
+            asset_allocations=[AssetAllocation(assets=[AssetClass(name="Stocks", weight=1.0)])],
+            expected_annual_returns=[0.0],
+            annual_volatilities=[0.0],
+            correlation_matrix=[[1.0]],
+            inflation_mean=0.0,
+            inflation_vol=0.0,
+        )
+        result = simulate(
+            plan, market, PolicyBundle(tax_model="us_federal"), SimulationConfig(n_paths=4)
+        )
+        tax = USFederalTaxModel().compute_annual_tax(48_000, 0, "single")
+        assert result.terminal_wealth_percentiles["p50"] == pytest.approx(1e6 - 48_000 - tax)
+
+    def test_traditional_outflow_counts_toward_the_rmd(self) -> None:
+        from monteplan.taxes.us_federal import USFederalTaxModel
+
+        rmd = 1_000_000 / 24.6
+        plan = PlanConfig(
+            current_age=75,
+            retirement_age=75,
+            end_age=76,
+            monthly_spending=0,
+            accounts=[AccountConfig(account_type="traditional", balance=1e6)],
+            discrete_events=[DiscreteEvent(age=75.5, amount=-rmd)],
+        )
+        market = MarketAssumptions(
+            asset_allocations=[AssetAllocation(assets=[AssetClass(name="Stocks", weight=1.0)])],
+            expected_annual_returns=[0.0],
+            annual_volatilities=[0.0],
+            correlation_matrix=[[1.0]],
+            inflation_mean=0.0,
+            inflation_vol=0.0,
+        )
+        result = simulate(
+            plan, market, PolicyBundle(tax_model="us_federal"), SimulationConfig(n_paths=4)
+        )
+        # No further distribution is forced, so nothing is reinvested.
+        tax = USFederalTaxModel().compute_annual_tax(rmd, 0, "single")
+        assert result.terminal_wealth_percentiles["p50"] == pytest.approx(1e6 - rmd - tax)
