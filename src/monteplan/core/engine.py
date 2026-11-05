@@ -33,7 +33,7 @@ from monteplan.policies.spending.floor_ceiling import FloorCeilingSpending
 from monteplan.policies.spending.guardrails import GuardrailsSpending
 from monteplan.policies.spending.percent_of_portfolio import PercentOfPortfolioSpending
 from monteplan.policies.spending.vpw import VPWSpending
-from monteplan.policies.withdrawals import withdraw
+from monteplan.policies.withdrawals import pay_tax, withdraw
 from monteplan.taxes.rmd import RMDCalculator
 from monteplan.taxes.simple import FlatTaxModel
 from monteplan.taxes.us_federal import USFederalTaxModel
@@ -520,6 +520,7 @@ def simulate(
                 state.annual_ordinary_income += actual_conversion
 
         # 7. Year-end annual tax computation (for US federal model)
+        tax_paid_from_traditional: npt.NDArray[np.floating[Any]] | float = 0.0
         if policies.tax_model == "us_federal" and month == 12:
             # Vectorized tax computation across all paths
             annual_tax = tax_model.compute_annual_tax_vectorized(
@@ -541,11 +542,8 @@ def simulate(
                     policies.filing_status,
                 )
             annual_tax = np.where(state.is_depleted, 0.0, annual_tax)
-            total_w = state.total_wealth
-            safe_total = np.where(total_w > 0, total_w, 1.0)
-            tax_frac = np.minimum(annual_tax / safe_total, 1.0)
             balances_before = ledger.snapshot(state)
-            state.positions *= 1.0 - tax_frac[:, np.newaxis, np.newaxis]
+            tax_paid_from_traditional = pay_tax(state, annual_tax)
             # Selling to pay the tax realizes gains of the following tax year
             ledger.record_flows(state, balances_before, t)
 
@@ -556,6 +554,8 @@ def simulate(
             state.annual_ordinary_income[:] = 0.0
             state.annual_ltcg[:] = 0.0
             state.annual_rmd_satisfied[:] = 0.0
+            # Tax paid from traditional accounts is a distribution of the new year
+            state.annual_ordinary_income += tax_paid_from_traditional
 
         # 8. Update depletion status
         state.is_depleted = state.total_wealth <= 0.0

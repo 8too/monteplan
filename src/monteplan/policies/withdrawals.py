@@ -68,3 +68,24 @@ def withdraw(
             total_withdrawn_after_tax += after_tax
 
     return total_withdrawn_after_tax
+
+
+def pay_tax(state: SimulationState, tax: np.ndarray) -> np.ndarray:
+    """Pay tax from taxable accounts first, then traditional, and Roth only once both are empty.
+
+    Positions are reduced pro-rata across assets within each account. A path that can't pay
+    all of its tax ends up with zero wealth.
+
+    Args:
+        state: Current simulation state (positions will be mutated).
+        tax: (n_paths,) tax due.
+
+    Returns:
+        (n_paths,) amount paid from traditional accounts, which is itself ordinary income.
+    """
+    trad_indices = [i for i, t in enumerate(state.account_types) if t == "traditional"]
+    trad_before = state.balances[:, trad_indices].sum(axis=1)
+    withdraw(state, tax, ["taxable", "traditional", "roth"], tax_rate=0.0)
+    trad_after = state.balances[:, trad_indices].sum(axis=1)
+    paid_from_traditional: np.ndarray = np.maximum(trad_before - trad_after, 0.0)
+    return paid_from_traditional

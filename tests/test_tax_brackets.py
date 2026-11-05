@@ -168,3 +168,39 @@ class TestEngineIntegration:
         )
         tax = USFederalTaxModel().compute_annual_tax(48_000, 0, "single")
         assert result.terminal_wealth_percentiles["p50"] == pytest.approx(1e6 - 48_000 - tax)
+
+    def test_tax_paid_from_traditional_is_next_years_income(self) -> None:
+        """Paying the tax from a traditional account is a taxable distribution itself."""
+        from monteplan.config.defaults import default_market
+        from monteplan.config.schema import (
+            AccountConfig,
+            PlanConfig,
+            PolicyBundle,
+            SimulationConfig,
+        )
+        from monteplan.core.engine import simulate
+
+        market = default_market().model_copy(
+            update={
+                "expected_annual_returns": [0.0] * 6,
+                "annual_volatilities": [0.0] * 6,
+                "inflation_mean": 0.0,
+                "inflation_vol": 0.0,
+            }
+        )
+        plan = PlanConfig(
+            current_age=60,
+            retirement_age=60,
+            end_age=62,
+            monthly_spending=4_000,
+            accounts=[AccountConfig(account_type="traditional", balance=1e6)],
+        )
+        result = simulate(
+            plan, market, PolicyBundle(tax_model="us_federal"), SimulationConfig(n_paths=10)
+        )
+        tax_model = USFederalTaxModel()
+        first_year_tax = tax_model.compute_annual_tax(48_000, 0, "single")
+        second_year_tax = tax_model.compute_annual_tax(48_000 + first_year_tax, 0, "single")
+        assert result.terminal_wealth_percentiles["p50"] == pytest.approx(
+            1e6 - 96_000 - first_year_tax - second_year_tax
+        )

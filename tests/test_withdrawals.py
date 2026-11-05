@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 
 from monteplan.core.state import SimulationState
-from monteplan.policies.withdrawals import withdraw
+from monteplan.policies.withdrawals import pay_tax, withdraw
 
 
 def _make_state(
@@ -118,3 +118,31 @@ class TestWithdrawals:
         # Traditional untouched
         np.testing.assert_allclose(state.positions[0, 1, 0], 50_000.0)
         np.testing.assert_allclose(state.positions[0, 1, 1], 50_000.0)
+
+
+class TestPayTax:
+    """Year-end tax comes from taxable, then traditional, and Roth only once both are empty."""
+
+    def _pay(self, tax: float) -> tuple[np.ndarray, np.ndarray]:
+        state = _make_state([[50_000, 100_000, 30_000]], ["taxable", "traditional", "roth"])
+        from_traditional = pay_tax(state, np.array([tax], dtype=float))
+        return state.balances[0], from_traditional
+
+    def test_taxable_first(self) -> None:
+        balances, from_traditional = self._pay(20_000)
+        np.testing.assert_allclose(balances, [30_000, 100_000, 30_000])
+        np.testing.assert_allclose(from_traditional, [0.0])
+
+    def test_then_traditional(self) -> None:
+        balances, from_traditional = self._pay(70_000)
+        np.testing.assert_allclose(balances, [0, 80_000, 30_000])
+        np.testing.assert_allclose(from_traditional, [20_000])
+
+    def test_roth_last(self) -> None:
+        balances, from_traditional = self._pay(160_000)
+        np.testing.assert_allclose(balances, [0, 0, 20_000])
+        np.testing.assert_allclose(from_traditional, [100_000])
+
+    def test_shortfall_takes_everything(self) -> None:
+        balances, _ = self._pay(200_000)
+        np.testing.assert_allclose(balances, [0, 0, 0])
