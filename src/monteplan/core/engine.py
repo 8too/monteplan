@@ -376,7 +376,7 @@ def simulate(
             # Track traditional balance before withdrawal to compute ordinary income
             trad_indices = [i for i, tp in enumerate(state.account_types) if tp == "traditional"]
             trad_before = (
-                sum(state.balances[:, i] for i in trad_indices)
+                state.balances[:, trad_indices].sum(axis=1)
                 if trad_indices
                 else np.zeros(n_paths)
             )
@@ -391,7 +391,7 @@ def simulate(
 
             # Accumulate ordinary income from traditional withdrawals
             if trad_indices:
-                trad_after = sum(state.balances[:, i] for i in trad_indices)
+                trad_after = state.balances[:, trad_indices].sum(axis=1)
                 trad_withdrawn = trad_before - trad_after
                 state.annual_ordinary_income += np.maximum(trad_withdrawn, 0.0)
 
@@ -496,10 +496,9 @@ def simulate(
                 i for i, tp in enumerate(state.account_types) if tp == "traditional"
             ]
             if trad_indices_yr:
-                trad_sum = np.zeros(n_paths)
-                for i in trad_indices_yr:
-                    trad_sum += state.balances[:, i]
-                state.prior_year_traditional_balance = trad_sum
+                state.prior_year_traditional_balance = state.balances[:, trad_indices_yr].sum(
+                    axis=1
+                )
 
             # Reset annual accumulators
             state.annual_ordinary_income[:] = 0.0
