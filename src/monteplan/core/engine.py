@@ -15,6 +15,7 @@ from monteplan.config.schema import (
     PolicyBundle,
     SimulationConfig,
 )
+from monteplan.core.lots import LotLedger
 from monteplan.core.rng import make_rng
 from monteplan.core.state import SimulationState
 from monteplan.core.timeline import Timeline
@@ -178,6 +179,7 @@ def simulate(
     account_types: list[str] = [a.account_type for a in plan.accounts]
     state = SimulationState.initialize(n_paths, initial_balances, account_types, weights)
     state.initial_portfolio_value = state.total_wealth.copy()
+    ledger = LotLedger(n_paths, plan.accounts, policies.lot_selection)
 
     # Prepare policies
     monthly_contributions = compute_monthly_contributions(
@@ -306,16 +308,19 @@ def simulate(
 
         # 3. Accumulation phase: add contributions with income growth
         if timeline.has_income(t):
+            balances_before = ledger.snapshot(state)
             apply_contributions(
                 state,
                 monthly_contributions,
                 current_weights,
                 income_growth_factor,
             )
+            ledger.record_flows(state, balances_before, t)
             income_growth_factor *= 1.0 + monthly_income_growth_rate
 
         # 4. Apply discrete events
         if t in event_steps:
+            balances_before = ledger.snapshot(state)
             event_amount = event_steps[t]
             if event_amount > 0:
                 # Inflow: distribute pro-rata across accounts by current balance
@@ -337,6 +342,7 @@ def simulate(
                     list(policies.withdrawal_order),
                     effective_tax_rate,
                 )
+            ledger.record_flows(state, balances_before, t)
 
         # 5. Rebalancing (calendar or threshold-based)
         month = timeline.month_of_year(t)
@@ -382,12 +388,14 @@ def simulate(
             )
 
             withdrawal_order: list[str] = list(policies.withdrawal_order)
+            balances_before = ledger.snapshot(state)
             withdraw(
                 state,
                 spending_need,
                 withdrawal_order,
                 effective_tax_rate,
             )
+            ledger.record_flows(state, balances_before, t)
 
             # Accumulate ordinary income from traditional withdrawals
             if trad_indices:
@@ -419,6 +427,10 @@ def simulate(
                         state.positions[:, idx, :] *= 1.0 - frac_arr[:, np.newaxis]
                         state.annual_ordinary_income += force_withdraw
                         rmd_shortfall -= force_withdraw
+
+        # Add the year's realized capital gains to the annual income
+        if month == 12:
+            ledger.close_year(state)
 
         # 6b. Roth conversions (year-end, within conversion window)
         if (
@@ -490,6 +502,7 @@ def simulate(
             total_w = state.total_wealth
             safe_total = np.where(total_w > 0, total_w, 1.0)
             tax_frac = np.minimum(annual_tax / safe_total, 1.0)
+            balances_before = ledger.snapshot(state)
             state.positions *= 1.0 - tax_frac[:, np.newaxis, np.newaxis]
             # Snapshot traditional balance for next year's RMD
             trad_indices_yr = [
@@ -504,6 +517,8 @@ def simulate(
             state.annual_ordinary_income[:] = 0.0
             state.annual_ltcg[:] = 0.0
             state.annual_rmd_satisfied[:] = 0.0
+            # Selling to pay the tax realizes gains of the following tax year
+            ledger.record_flows(state, balances_before, t)
 
         # 8. Update depletion status
         state.is_depleted = state.total_wealth <= 0.0

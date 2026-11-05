@@ -144,6 +144,22 @@ class SpendingChange(BaseModel):
     )
 
 
+class LotConfig(BaseModel):
+    """A tax lot of a taxable account: shares bought together, with one cost basis."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    amount: float = Field(ge=0, description="Current market value in dollars")
+    cost_basis: float | None = Field(
+        default=None,
+        ge=0,
+        description="Total nominal cost basis in dollars (None = amount, i.e. no unrealized gain)",
+    )
+    months_held: int = Field(
+        ge=0, description="Months since the lot was bought; gains are long-term after 12"
+    )
+
+
 class AccountConfig(BaseModel):
     """A single investment account."""
 
@@ -154,6 +170,24 @@ class AccountConfig(BaseModel):
     annual_contribution: float = Field(
         default=0.0, ge=0, description="Annual contribution in dollars"
     )
+    lots: list[LotConfig] | None = Field(
+        default=None,
+        description=(
+            "Tax lots of a taxable account, summing to balance. None = a single long-term "
+            "lot with the balance as its cost basis."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _validate_lots(self) -> AccountConfig:
+        if self.lots is None:
+            return self
+        if self.account_type != "taxable":
+            raise ValueError("Only taxable accounts have tax lots")
+        total = sum(lot.amount for lot in self.lots)
+        if abs(total - self.balance) > 1e-6 * max(self.balance, 1.0):
+            raise ValueError(f"Lot amounts sum to {total}, but the balance is {self.balance}")
+        return self
 
 
 class PlanConfig(BaseModel):
@@ -520,7 +554,14 @@ class PolicyBundle(BaseModel):
         default=["taxable", "traditional", "roth"],
         description="Account withdrawal priority order",
     )
-    tax_model: Literal["flat", "us_federal"] = Field(
+    lot_selection: Literal["fifo", "lifo", "hifo"] = Field(
+        default="fifo",
+        description=(
+            "Order in which a taxable account's lots are sold: oldest first, newest first, "
+            "or highest cost basis per share first"
+        ),
+    )
+    tax_model:Literal["flat", "us_federal"] = Field(
         default="flat",
         description="Tax model to use",
     )
