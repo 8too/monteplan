@@ -210,7 +210,12 @@ def simulate(
         tax_model = USFederalTaxModel()
     else:
         tax_model = FlatTaxModel(policies.tax_rate)
-    effective_tax_rate = tax_model.tax_rate_traditional() + policies.state_tax_rate
+    # Rate at which traditional withdrawals are grossed up to cover their tax. The US federal
+    # model taxes them at year end instead, along with all other income.
+    if policies.tax_model == "us_federal":
+        effective_tax_rate = 0.0
+    else:
+        effective_tax_rate = tax_model.tax_rate_traditional() + policies.state_tax_rate
     rmd_calc = RMDCalculator()
 
     # Pre-compute discrete event steps

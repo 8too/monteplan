@@ -129,5 +129,42 @@ class TestEngineIntegration:
         r_flat = simulate(plan, market, PolicyBundle(tax_model="flat"), sim)
         r_fed = simulate(plan, market, PolicyBundle(tax_model="us_federal"), sim)
 
-        # They should differ (federal has standard deduction + progressive rates)
-        assert r_flat.success_probability != r_fed.success_probability
+        # They should differ (federal has standard deduction + progressive rates). The
+        # success probabilities of only 200 paths can coincide, so compare terminal wealth.
+        assert (
+            r_flat.terminal_wealth_percentiles["p50"] != r_fed.terminal_wealth_percentiles["p50"]
+        )
+
+    def test_us_federal_taxes_traditional_withdrawals_once(self) -> None:
+        """Withdrawals aren't grossed up for tax that is also charged at year end."""
+        from monteplan.config.defaults import default_market
+        from monteplan.config.schema import (
+            AccountConfig,
+            PlanConfig,
+            PolicyBundle,
+            SimulationConfig,
+        )
+        from monteplan.core.engine import simulate
+
+        # No returns and no inflation, so every path spends exactly 12 * 4,000 from the
+        # traditional account and pays the tax on it.
+        market = default_market().model_copy(
+            update={
+                "expected_annual_returns": [0.0] * 6,
+                "annual_volatilities": [0.0] * 6,
+                "inflation_mean": 0.0,
+                "inflation_vol": 0.0,
+            }
+        )
+        plan = PlanConfig(
+            current_age=60,
+            retirement_age=60,
+            end_age=61,
+            monthly_spending=4_000,
+            accounts=[AccountConfig(account_type="traditional", balance=1e6)],
+        )
+        result = simulate(
+            plan, market, PolicyBundle(tax_model="us_federal"), SimulationConfig(n_paths=10)
+        )
+        tax = USFederalTaxModel().compute_annual_tax(48_000, 0, "single")
+        assert result.terminal_wealth_percentiles["p50"] == pytest.approx(1e6 - 48_000 - tax)
