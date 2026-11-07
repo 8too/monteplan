@@ -251,6 +251,14 @@ def simulate(
         for sc in plan.spending_changes
     ]
 
+    # Healthcare costs: today's monthly amount and its monthly nominal growth
+    healthcare_monthly = 0.0
+    healthcare_monthly_growth = 0.0
+    if plan.healthcare is not None:
+        healthcare = plan.healthcare
+        healthcare_monthly = healthcare.monthly_premium + healthcare.monthly_out_of_pocket
+        healthcare_monthly_growth = (1.0 + healthcare.growth_rate) ** (1.0 / 12.0) - 1.0
+
     # Pre-compute guaranteed income streams (start/end steps and monthly amounts)
     gi_streams: list[tuple[int, int, float, float, bool]] = []
     for gi in plan.guaranteed_income:
@@ -387,6 +395,10 @@ def simulate(
             for step_start, multiplier in spending_steps:
                 if t >= step_start:
                     spending_need = spending_need * multiplier
+            if healthcare_monthly > 0:
+                spending_need = (
+                    spending_need + healthcare_monthly * (1.0 + healthcare_monthly_growth) ** t
+                )
 
             # Record total spending (before GI offset, for time series)
             spending_history[:, t] = spending_need

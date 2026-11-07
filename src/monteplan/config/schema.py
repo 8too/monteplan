@@ -144,6 +144,23 @@ class SpendingChange(BaseModel):
     )
 
 
+class HealthcareCost(BaseModel):
+    """Healthcare costs paid in retirement on top of the spending policy's amount."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    monthly_premium: float = Field(default=0.0, ge=0, description="Monthly premium today")
+    monthly_out_of_pocket: float = Field(
+        default=0.0, ge=0, description="Monthly out-of-pocket costs today"
+    )
+    growth_rate: float = Field(
+        default=0.05,
+        ge=-0.5,
+        le=0.5,
+        description="Annual nominal growth rate of the costs from the simulation start",
+    )
+
+
 class LotConfig(BaseModel):
     """A tax lot of a taxable account: shares bought together, with one cost basis."""
 
@@ -221,6 +238,9 @@ class PlanConfig(BaseModel):
     spending_changes: list[SpendingChange] = Field(
         default_factory=list,
         description="Step changes to retirement spending by age (e.g. after a death)",
+    )
+    healthcare: HealthcareCost | None = Field(
+        default=None, description="Healthcare costs in retirement (None = not modeled)"
     )
 
     @model_validator(mode="after")
