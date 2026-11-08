@@ -27,16 +27,17 @@ policies = PolicyBundle(
 ### How It Works
 
 1. **Traditional account withdrawals** are taxed as ordinary income through progressive brackets
-2. **Taxable account gains** are taxed at LTCG rates (0%, 15%, or 20% depending on income)
+2. **Taxable account gains** are taxed at LTCG rates (0%, 15%, or 20% depending on income), as the top layer of taxable income
 3. **Roth withdrawals** are tax-free
 4. **Standard deduction** is applied before bracket calculation
+5. **Inflation indexing**: the 2026 standard deduction and bracket thresholds are indexed by each path's simulated inflation in later years
 
 ### Filing Status
 
-| Status | Standard Deduction (2024) | Bracket Widths |
+| Status | Standard Deduction (2026) | Bracket Widths |
 |---|---|---|
-| `single` | $14,600 | Standard |
-| `married_jointly` | $29,200 | ~2x single |
+| `single` | $16,100 | Standard |
+| `married_jointly` | $32,200 | ~2x single |
 
 ### Required Minimum Distributions (RMDs)
 

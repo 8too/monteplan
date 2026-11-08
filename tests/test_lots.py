@@ -166,19 +166,22 @@ class TestLotConfig:
 
 
 class TestEngine:
-    @staticmethod
-    def _success(tax_model: str, cost_basis: float | None) -> float:
+    BALANCE = 2e6
+
+    @classmethod
+    def _success(cls, tax_model: str, cost_basis: float | None) -> float:
         lots = (
             None
             if cost_basis is None
-            else [LotConfig(amount=1e6, cost_basis=cost_basis, months_held=24)]
+            else [LotConfig(amount=cls.BALANCE, cost_basis=cost_basis, months_held=24)]
         )
         plan = PlanConfig(
             current_age=60,
             retirement_age=60,
             end_age=90,
-            monthly_spending=4_000,
-            accounts=[AccountConfig(account_type="taxable", balance=1e6, lots=lots)],
+            # Gains above the standard deduction plus the 0% gains bracket, so they're taxed
+            monthly_spending=7_000,
+            accounts=[AccountConfig(account_type="taxable", balance=cls.BALANCE, lots=lots)],
         )
         result = simulate(
             plan,
@@ -190,7 +193,7 @@ class TestEngine:
 
     def test_us_federal_taxes_realized_gains(self) -> None:
         """Selling low-basis lots costs capital gains tax (upstream issue #2)."""
-        assert self._success("us_federal", 0.0) < self._success("us_federal", 1e6)
+        assert self._success("us_federal", 0.0) < self._success("us_federal", self.BALANCE)
 
     def test_default_basis_is_the_balance(self) -> None:
-        assert self._success("us_federal", None) == self._success("us_federal", 1e6)
+        assert self._success("us_federal", None) == self._success("us_federal", self.BALANCE)

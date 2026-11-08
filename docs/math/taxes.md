@@ -14,29 +14,49 @@ $$\text{tax} = \sum_{k=1}^{K} r_k \cdot \min(\max(\text{taxable income} - b_{k-1
 
 where $r_k$ is the marginal rate for bracket $k$ and $[b_{k-1}, b_k)$ is the bracket range.
 
-### 2024 Federal Tax Brackets (Single)
+### 2026 Federal Tax Brackets (Single)
 
-| Bracket | Rate |
+Source: IRS Revenue Procedure 2025-32.
+
+| Taxable Income | Rate |
 |---|---|
-| $0 -- $11,600 | 10% |
-| $11,601 -- $47,150 | 12% |
-| $47,151 -- $100,525 | 22% |
-| $100,526 -- $191,950 | 24% |
-| $191,951 -- $243,725 | 32% |
-| $243,726 -- $609,350 | 35% |
-| Over $609,350 | 37% |
+| $0 -- $12,400 | 10% |
+| $12,401 -- $50,400 | 12% |
+| $50,401 -- $105,700 | 22% |
+| $105,701 -- $201,775 | 24% |
+| $201,776 -- $256,225 | 32% |
+| $256,226 -- $640,600 | 35% |
+| Over $640,600 | 37% |
 
-Standard deduction (2024): $14,600 (single), $29,200 (married filing jointly).
+Standard deduction (2026): $16,100 (single), $32,200 (married filing jointly).
 
 ### Long-Term Capital Gains
 
-Taxable account gains are taxed at separate LTCG rates based on total income:
+Net long-term gains are taxed at separate rates. Short-term gains count as ordinary income.
 
-| Income Level (Single) | LTCG Rate |
+| Taxable Income (Single) | LTCG Rate |
 |---|---|
-| Up to $47,025 | 0% |
-| $47,026 -- $518,900 | 15% |
-| Over $518,900 | 20% |
+| Up to $49,450 | 0% |
+| $49,451 -- $545,500 | 15% |
+| Over $545,500 | 20% |
+
+The gains are the top layer of taxable income: ordinary income fills the brackets first, and
+each gains rate applies to the part of the gains that falls into its bracket. Any standard
+deduction left unused by ordinary income reduces the gains first. With ordinary taxable income
+$O$ and taxable gains $G$, the gains tax is
+
+$$\text{LTCG tax} = T_\text{LTCG}(O + G) - T_\text{LTCG}(O)$$
+
+where $T_\text{LTCG}$ applies the gains rates progressively to taxable income.
+
+### Inflation Indexing
+
+The IRS indexes the standard deduction and all bracket thresholds for inflation each year.
+The engine takes the tax tables to be those of the simulation's first year and multiplies
+every amount in a later year by that path's cumulative simulated inflation up to the start of
+the year. Income that keeps pace with inflation thus pays the same real tax. The NIIT
+thresholds ($200,000 single, $250,000 married filing jointly) are fixed by statute and not
+indexed.
 
 ### Vectorized Implementation
 
@@ -47,6 +67,7 @@ compute_annual_tax_vectorized(
     ordinary_income: NDArray,    # (n_paths,)
     ltcg: NDArray,               # (n_paths,)
     filing_status: str,
+    inflation_index: NDArray,    # (n_paths,) price level relative to the table year
 ) -> NDArray                     # (n_paths,)
 ```
 

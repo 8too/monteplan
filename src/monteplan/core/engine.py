@@ -236,6 +236,10 @@ def simulate(
         effective_tax_rate = 0.0
     else:
         effective_tax_rate = tax_model.tax_rate_traditional() + policies.state_tax_rate
+    # Price level at the start of the current tax year relative to the simulation start, by
+    # which the US federal tax amounts are indexed. The tax tables are taken to be those of
+    # the simulation's first year.
+    tax_index = np.ones(n_paths)
     rmd_calc = RMDCalculator()
 
     # Pre-compute discrete event steps
@@ -498,7 +502,7 @@ def simulate(
             if roth_cfg.strategy == "fill_bracket":
                 # Fill to bracket ceiling minus already-accumulated ordinary income
                 conversion_target = np.maximum(
-                    roth_bracket_ceiling - state.annual_ordinary_income, 0.0
+                    roth_bracket_ceiling * tax_index - state.annual_ordinary_income, 0.0
                 )
             else:
                 conversion_target = np.full(n_paths, roth_cfg.annual_amount)
@@ -539,6 +543,7 @@ def simulate(
                 state.annual_ordinary_income,
                 state.annual_ltcg,
                 policies.filing_status,
+                tax_index,
             )
             # State income tax overlay
             if policies.state_tax_rate > 0:
@@ -568,6 +573,8 @@ def simulate(
             state.annual_rmd_satisfied[:] = 0.0
             # Tax paid from traditional accounts is a distribution of the new year
             state.annual_ordinary_income += tax_paid_from_traditional
+            # The new year's tax amounts are indexed by this year's inflation
+            tax_index = state.cumulative_inflation.copy()
 
         # 8. Update depletion status
         state.is_depleted = state.total_wealth <= 0.0

@@ -147,7 +147,7 @@ st.subheader("Tax Model")
 tax_model_options = ["flat", "us_federal"]
 tax_model_labels = {
     "flat": "Flat Rate",
-    "us_federal": "US Federal Brackets (2024)",
+    "us_federal": "US Federal Brackets (2026)",
 }
 tax_model = st.selectbox(
     "Tax Model",

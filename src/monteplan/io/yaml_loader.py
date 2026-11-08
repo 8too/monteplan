@@ -29,7 +29,7 @@ def load_package_yaml(relative_path: str) -> Any:
 
     Args:
         relative_path: Path relative to ``src/monteplan/``,
-            e.g. ``"taxes/tables/us_federal_2024.yaml"``.
+            e.g. ``"taxes/tables/us_federal_2026.yaml"``.
 
     Returns:
         Parsed YAML content.

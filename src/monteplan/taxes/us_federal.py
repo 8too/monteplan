@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 from typing import Any
 
 import numpy as np
@@ -10,64 +9,53 @@ from numpy.typing import NDArray
 
 from monteplan.io.yaml_loader import load_package_yaml
 
+# Tax table year used by the engine.
+TAX_YEAR = 2026
+
 
 class USFederalTaxModel:
     """US Federal income tax with progressive brackets.
 
-    Loads bracket tables from YAML data files. Supports ordinary income
-    brackets and long-term capital gains rates.
+    Loads bracket tables from YAML data files. Supports ordinary income brackets and
+    long-term capital gains rates.
+
+    The tables hold the amounts of their tax year. Later years are modeled by passing
+    ``inflation_index``, the price level relative to the table year (a scalar or one value
+    per path), which scales the standard deduction and every bracket threshold the way the
+    IRS indexes them each year. The NIIT thresholds are fixed by statute and not indexed.
     """
 
-    def __init__(self, tax_year: int = 2024) -> None:
+    def __init__(self, tax_year: int = TAX_YEAR) -> None:
         data: dict[str, Any] = load_package_yaml(f"taxes/tables/us_federal_{tax_year}.yaml")
         self._standard_deduction: dict[str, float] = data["standard_deduction"]
         self._ordinary_brackets: dict[str, list[list[Any]]] = data["ordinary_brackets"]
         self._ltcg_brackets: dict[str, list[list[Any]]] = data["ltcg_brackets"]
 
+    @staticmethod
     def _apply_brackets(
-        self,
-        taxable_income: float,
-        brackets: list[list[Any]],
-    ) -> float:
-        """Compute tax using progressive brackets."""
-        if taxable_income <= 0:
-            return 0.0
-        tax = 0.0
-        prev_bound = 0.0
-        for upper_bound, rate in brackets:
-            if upper_bound is None:
-                upper_bound = math.inf
-            taxable_in_bracket = min(taxable_income, upper_bound) - prev_bound
-            if taxable_in_bracket <= 0:
-                break
-            tax += taxable_in_bracket * rate
-            prev_bound = upper_bound
-        return tax
-
-    def _apply_brackets_vectorized(
-        self,
         taxable_income: NDArray[np.floating[Any]],
         brackets: list[list[Any]],
+        inflation_index: NDArray[np.floating[Any]],
     ) -> NDArray[np.floating[Any]]:
-        """Vectorized progressive bracket computation across all paths."""
-        tax: NDArray[np.floating[Any]] = np.zeros_like(taxable_income)
-        prev_bound = 0.0
+        """Progressive tax on taxable income, with bracket bounds scaled by the index."""
+        tax: NDArray[np.floating[Any]] = np.zeros(
+            np.broadcast(taxable_income, inflation_index).shape
+        )
+        prev_bound: NDArray[np.floating[Any]] | float = 0.0
         for upper_bound, rate in brackets:
-            if upper_bound is None:
-                upper_bound = np.inf
-            taxable_in_bracket = np.minimum(taxable_income, upper_bound) - prev_bound
+            bound = np.inf if upper_bound is None else upper_bound * inflation_index
+            taxable_in_bracket = np.minimum(taxable_income, bound) - prev_bound
             tax += np.maximum(taxable_in_bracket, 0.0) * rate
-            prev_bound = upper_bound
+            prev_bound = bound
         return tax
 
-    def standard_deduction(self, filing_status: str) -> float:
-        """Return standard deduction for filing status."""
-        return self._standard_deduction[filing_status]
+    def standard_deduction(self, filing_status: str, inflation_index: float = 1.0) -> float:
+        """Return the standard deduction for a filing status, indexed by inflation."""
+        return self._standard_deduction[filing_status] * inflation_index
 
     def tax_on_income(self, gross_income: float) -> float:
         """Compute tax on ordinary income (single filer, after standard deduction)."""
-        taxable = max(0.0, gross_income - self._standard_deduction["single"])
-        return self._apply_brackets(taxable, self._ordinary_brackets["single"])
+        return self.compute_annual_tax(gross_income, 0.0, "single")
 
     def tax_rate_traditional(self) -> float:
         """Approximate effective rate for traditional withdrawals.
@@ -82,46 +70,58 @@ class USFederalTaxModel:
         ordinary_income: float,
         ltcg: float,
         filing_status: str,
+        inflation_index: float = 1.0,
     ) -> float:
-        """Compute total annual federal tax.
-
-        Ordinary income is taxed at progressive rates after standard deduction.
-        LTCG is taxed at preferential rates based on total taxable income.
-        """
-        std_ded = self._standard_deduction[filing_status]
-        taxable_ordinary = max(0.0, ordinary_income - std_ded)
-        ordinary_tax = self._apply_brackets(
-            taxable_ordinary, self._ordinary_brackets[filing_status]
+        """Compute total annual federal tax; see ``compute_annual_tax_vectorized()``."""
+        tax = self.compute_annual_tax_vectorized(
+            np.array([ordinary_income], dtype=float),
+            np.array([ltcg], dtype=float),
+            filing_status,
+            inflation_index,
         )
-
-        # LTCG brackets are based on taxable income
-        # For simplicity, apply LTCG brackets directly to LTCG amount
-        ltcg_tax = self._apply_brackets(ltcg, self._ltcg_brackets[filing_status])
-
-        return ordinary_tax + ltcg_tax
+        return float(tax[0])
 
     def compute_annual_tax_vectorized(
         self,
         ordinary_income: NDArray[np.floating[Any]],
         ltcg: NDArray[np.floating[Any]],
         filing_status: str,
+        inflation_index: NDArray[np.floating[Any]] | float = 1.0,
     ) -> NDArray[np.floating[Any]]:
         """Vectorized annual tax across all paths.
 
+        Ordinary income is reduced by the standard deduction and taxed at the ordinary
+        rates. Long-term gains are reduced by any standard deduction ordinary income left
+        unused, and are then the top layer of taxable income: each gains bracket applies to
+        the part of the gains whose position above the taxable ordinary income falls into
+        it. Ordinary income thus fills the 0% gains bracket first.
+
         Args:
-            ordinary_income: (n_paths,) ordinary income per path.
-            ltcg: (n_paths,) long-term capital gains per path.
+            ordinary_income: (n_paths,) ordinary income per path, including net
+                short-term gains.
+            ltcg: (n_paths,) net long-term capital gains per path (non-negative).
             filing_status: Filing status key.
+            inflation_index: Price level relative to the tax table year, as a scalar or
+                (n_paths,) array.
 
         Returns:
             (n_paths,) total tax liability per path.
         """
-        std_ded = self._standard_deduction[filing_status]
-        taxable_ordinary = np.maximum(ordinary_income - std_ded, 0.0)
-        ordinary_tax = self._apply_brackets_vectorized(
-            taxable_ordinary, self._ordinary_brackets[filing_status]
+        index = np.asarray(inflation_index, dtype=float)
+        deduction = self._standard_deduction[filing_status] * index
+        taxable_ordinary = np.maximum(ordinary_income - deduction, 0.0)
+        unused_deduction = np.maximum(deduction - ordinary_income, 0.0)
+        taxable_ltcg = np.maximum(ltcg - unused_deduction, 0.0)
+
+        ordinary_tax = self._apply_brackets(
+            taxable_ordinary, self._ordinary_brackets[filing_status], index
         )
-        ltcg_tax = self._apply_brackets_vectorized(ltcg, self._ltcg_brackets[filing_status])
+        # Tax on the slice of taxable income from taxable_ordinary up to taxable_ordinary +
+        # taxable_ltcg, at the gains rates.
+        ltcg_brackets = self._ltcg_brackets[filing_status]
+        ltcg_tax = self._apply_brackets(
+            taxable_ordinary + taxable_ltcg, ltcg_brackets, index
+        ) - self._apply_brackets(taxable_ordinary, ltcg_brackets, index)
         result: NDArray[np.floating[Any]] = ordinary_tax + ltcg_tax
         return result
 
@@ -140,7 +140,8 @@ class USFederalTaxModel:
         """Compute Net Investment Income Tax (3.8% surtax).
 
         NIIT applies to the lesser of net investment income (here approximated
-        as LTCG) or the excess of MAGI over the threshold.
+        as LTCG) or the excess of MAGI over the threshold. The thresholds are not
+        indexed for inflation.
 
         Args:
             ordinary_income: (n_paths,) ordinary income per path.
@@ -161,7 +162,9 @@ class USFederalTaxModel:
 
         Returns the maximum gross income (bracket upper bound + standard
         deduction) at which the marginal rate is still at or below
-        ``target_rate``. Used by fill_bracket Roth conversion strategy.
+        ``target_rate``, in the amounts of the table year. Since both parts are
+        indexed, the ceiling of a later year is this times its inflation index.
+        Used by fill_bracket Roth conversion strategy.
 
         Args:
             target_rate: Target marginal tax rate (e.g. 0.22 for 22% bracket).
@@ -179,11 +182,13 @@ class USFederalTaxModel:
             ceiling = 10_000_000.0 if upper_bound is None else float(upper_bound)
         return ceiling + std_ded
 
-    def marginal_rate(self, taxable_income: float, filing_status: str) -> float:
+    def marginal_rate(
+        self, taxable_income: float, filing_status: str, inflation_index: float = 1.0
+    ) -> float:
         """Return the marginal ordinary income tax rate at given taxable income."""
         brackets = self._ordinary_brackets[filing_status]
         for upper_bound, rate in brackets:
-            if upper_bound is None or taxable_income <= upper_bound:
+            if upper_bound is None or taxable_income <= upper_bound * inflation_index:
                 return float(rate)
         # Should not reach here; return top rate
         return float(brackets[-1][1])

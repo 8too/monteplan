@@ -72,6 +72,10 @@ class TestBracketCeiling:
         assert ceiling > std_ded
         assert ceiling > 0
 
+    def test_2026_ceilings(self) -> None:
+        assert self.model.bracket_ceiling(0.22, "single") == 105_700 + 16_100
+        assert self.model.bracket_ceiling(0.12, "married_jointly") == 100_800 + 32_200
+
     def test_higher_bracket_higher_ceiling(self) -> None:
         c22 = self.model.bracket_ceiling(0.22, "single")
         c32 = self.model.bracket_ceiling(0.32, "single")

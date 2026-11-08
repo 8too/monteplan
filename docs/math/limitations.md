@@ -12,7 +12,7 @@ monteplan is an educational and planning tool. Understanding its limitations is 
 - The model assumes a single filing status for the entire simulation horizon.
 - Tax-loss harvesting, estate taxes, and alternative minimum tax (AMT) are not modeled.
 - Capital gains are simplified -- the model does not track individual lot-level cost basis.
-- Tax bracket tables are static (2024 values); they do not adjust for future legislation.
+- Tax bracket tables are the 2026 values, indexed by simulated inflation in later years; they do not adjust for future legislation.
 
 ### No Behavioral Dynamics
 

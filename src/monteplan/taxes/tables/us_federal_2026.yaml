@@ -1,0 +1,42 @@
+# US Federal Income Tax Brackets — 2026 Tax Year
+# Source: IRS Revenue Procedure 2025-32, sections 4.01 (tax rate tables),
+# 4.03 (maximum capital gains rate) and 4.14 (standard deduction).
+#
+# The engine indexes all amounts below by simulated inflation for later years.
+
+standard_deduction:
+  single: 16100
+  married_jointly: 32200
+
+# Ordinary income brackets of taxable income: [upper_bound, marginal_rate]
+# The last bracket has no upper bound (infinity).
+ordinary_brackets:
+  single:
+    - [12400, 0.10]
+    - [50400, 0.12]
+    - [105700, 0.22]
+    - [201775, 0.24]
+    - [256225, 0.32]
+    - [640600, 0.35]
+    - [null, 0.37]
+  married_jointly:
+    - [24800, 0.10]
+    - [100800, 0.12]
+    - [211400, 0.22]
+    - [403550, 0.24]
+    - [512450, 0.32]
+    - [768700, 0.35]
+    - [null, 0.37]
+
+# Long-term capital gains brackets of taxable income: [upper_bound, rate]
+# Gains are the top layer of taxable income, so ordinary income fills the
+# lower brackets first.
+ltcg_brackets:
+  single:
+    - [49450, 0.0]
+    - [545500, 0.15]
+    - [null, 0.20]
+  married_jointly:
+    - [98900, 0.0]
+    - [613700, 0.15]
+    - [null, 0.20]
