@@ -1,0 +1,23 @@
+# Medicare Part B premium and income-related monthly adjustment amounts (IRMAA) — 2026
+# Source: CMS fact sheet "2026 Medicare Parts A & B Premiums and Deductibles"
+# (November 14, 2025).
+
+# Standard monthly Part B premium per enrollee.
+part_b_premium: 202.90
+
+# IRMAA tiers by modified adjusted gross income of two years earlier (2024 for 2026):
+# [income above which the tier applies, monthly Part B adjustment, monthly Part D
+# adjustment], per enrollee. The top tier starts at its income ("at least").
+irmaa:
+  single:
+    - [109000, 81.20, 14.50]
+    - [137000, 202.90, 37.50]
+    - [171000, 324.60, 60.40]
+    - [205000, 446.30, 83.30]
+    - [500000, 487.00, 91.00]
+  married_jointly:
+    - [218000, 81.20, 14.50]
+    - [274000, 202.90, 37.50]
+    - [342000, 324.60, 60.40]
+    - [410000, 446.30, 83.30]
+    - [750000, 487.00, 91.00]

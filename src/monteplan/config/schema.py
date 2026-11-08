@@ -145,11 +145,44 @@ class SpendingChange(BaseModel):
 
 
 class HealthcareCost(BaseModel):
-    """Healthcare costs paid in retirement on top of the spending policy's amount."""
+    """Healthcare costs paid in retirement on top of the spending policy's amount.
+
+    Before ``medicare_age``, the household buys an ACA marketplace plan and gets the
+    premium tax credit for its income each year, settled with the year-end taxes. From
+    ``medicare_age``, each enrollee pays the Medicare Part B premium plus income-related
+    surcharges (IRMAA) on Parts B and D, and the household pays its supplemental premiums.
+    All amounts are for the household in today's dollars and grow at ``growth_rate``.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
-    monthly_premium: float = Field(default=0.0, ge=0, description="Monthly premium today")
+    monthly_premium: float = Field(
+        default=0.0, ge=0, description="Monthly unsubsidized premium of the ACA plan today"
+    )
+    monthly_benchmark_premium: float = Field(
+        default=0.0,
+        ge=0,
+        description=(
+            "Monthly premium of the second-lowest-cost silver plan today, the benchmark of "
+            "the premium tax credit (0 = no credit)"
+        ),
+    )
+    aca_subsidy: Literal["original", "enhanced", "none"] = Field(
+        default="original",
+        description=(
+            "Premium tax credit: current law (original), the enhanced credits of 2021-2025, "
+            "or none"
+        ),
+    )
+    household_size: int = Field(
+        default=1, ge=1, le=2, description="People covered, and Medicare enrollees from 65"
+    )
+    medicare_age: int = Field(default=65, ge=0, le=120, description="Age Medicare starts")
+    monthly_medicare_supplement: float = Field(
+        default=0.0,
+        ge=0,
+        description="Monthly Medigap and Part D plan premiums of the household today",
+    )
     monthly_out_of_pocket: float = Field(
         default=0.0, ge=0, description="Monthly out-of-pocket costs today"
     )

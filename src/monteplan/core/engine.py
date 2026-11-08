@@ -20,6 +20,7 @@ from monteplan.core.lots import LotLedger
 from monteplan.core.rng import make_rng
 from monteplan.core.state import SimulationState
 from monteplan.core.timeline import Timeline
+from monteplan.healthcare.costs import HealthcareModel
 from monteplan.io.serialize import compute_config_hash
 from monteplan.models.inflation import OUInflationModel, RegimeSwitchingInflationModel
 from monteplan.models.returns.bootstrap import HistoricalBootstrapReturns
@@ -37,6 +38,16 @@ from monteplan.policies.withdrawals import pay_tax, withdraw
 from monteplan.taxes.rmd import RMDCalculator
 from monteplan.taxes.simple import FlatTaxModel
 from monteplan.taxes.us_federal import USFederalTaxModel
+
+
+def _deposit(
+    state: SimulationState,
+    amount: npt.NDArray[np.floating[Any]],
+    weights: npt.NDArray[np.floating[Any]],
+) -> None:
+    """Invests cash per path in the first taxable account, or the first account if none."""
+    idx = state.account_types.index("taxable") if "taxable" in state.account_types else 0
+    state.positions[:, idx, :] += amount[:, np.newaxis] * weights[idx][np.newaxis, :]
 
 
 def _traditional_balance(state: SimulationState) -> npt.NDArray[np.floating[Any]]:
@@ -255,13 +266,12 @@ def simulate(
         for sc in plan.spending_changes
     ]
 
-    # Healthcare costs: today's monthly amount and its monthly nominal growth
-    healthcare_monthly = 0.0
-    healthcare_monthly_growth = 0.0
-    if plan.healthcare is not None:
-        healthcare = plan.healthcare
-        healthcare_monthly = healthcare.monthly_premium + healthcare.monthly_out_of_pocket
-        healthcare_monthly_growth = (1.0 + healthcare.growth_rate) ** (1.0 / 12.0) - 1.0
+    # Healthcare costs in retirement and the premium tax credit
+    healthcare = (
+        None
+        if plan.healthcare is None
+        else HealthcareModel(plan.healthcare, policies.filing_status, n_paths)
+    )
 
     # Pre-compute guaranteed income streams (start/end steps and monthly amounts)
     gi_streams: list[tuple[int, int, float, float, bool]] = []
@@ -399,9 +409,9 @@ def simulate(
             for step_start, multiplier in spending_steps:
                 if t >= step_start:
                     spending_need = spending_need * multiplier
-            if healthcare_monthly > 0:
-                spending_need = (
-                    spending_need + healthcare_monthly * (1.0 + healthcare_monthly_growth) ** t
+            if healthcare is not None:
+                spending_need = spending_need + healthcare.monthly_cost(
+                    t, timeline.age_at(t), ~state.is_depleted
                 )
 
             # Record total spending (before GI offset, for time series)
@@ -535,32 +545,42 @@ def simulate(
                 # Conversion counts as ordinary income
                 state.annual_ordinary_income += actual_conversion
 
-        # 7. Year-end annual tax computation (for US federal model)
+        # 7. Year-end annual tax (US federal model) and premium tax credit
         tax_paid_from_traditional: npt.NDArray[np.floating[Any]] | float = 0.0
-        if policies.tax_model == "us_federal" and month == 12:
-            # Vectorized tax computation across all paths
-            annual_tax = tax_model.compute_annual_tax_vectorized(
-                state.annual_ordinary_income,
-                state.annual_ltcg,
-                policies.filing_status,
-                tax_index,
-            )
-            # State income tax overlay
-            if policies.state_tax_rate > 0:
-                annual_tax = (
-                    annual_tax
-                    + (state.annual_ordinary_income + state.annual_ltcg) * policies.state_tax_rate
-                )
-            # Net Investment Income Tax (3.8% surtax)
-            if policies.include_niit and isinstance(tax_model, USFederalTaxModel):
-                annual_tax = annual_tax + tax_model.compute_niit_vectorized(
+        if month == 12 and (policies.tax_model == "us_federal" or healthcare is not None):
+            annual_tax = np.zeros(n_paths)
+            if policies.tax_model == "us_federal":
+                annual_tax = tax_model.compute_annual_tax_vectorized(
                     state.annual_ordinary_income,
                     state.annual_ltcg,
                     policies.filing_status,
+                    tax_index,
+                )
+                # State income tax overlay
+                if policies.state_tax_rate > 0:
+                    annual_tax = (
+                        annual_tax
+                        + (state.annual_ordinary_income + state.annual_ltcg)
+                        * policies.state_tax_rate
+                    )
+                # Net Investment Income Tax (3.8% surtax)
+                if policies.include_niit and isinstance(tax_model, USFederalTaxModel):
+                    annual_tax = annual_tax + tax_model.compute_niit_vectorized(
+                        state.annual_ordinary_income,
+                        state.annual_ltcg,
+                        policies.filing_status,
+                    )
+            if healthcare is not None:
+                # The credit is refundable: it reduces the tax, and any excess is paid out
+                annual_tax = annual_tax - healthcare.close_year(
+                    state.annual_ordinary_income + state.annual_ltcg,
+                    tax_index,
+                    state.cumulative_inflation,
                 )
             annual_tax = np.where(state.is_depleted, 0.0, annual_tax)
             balances_before = ledger.snapshot(state)
-            tax_paid_from_traditional = pay_tax(state, annual_tax)
+            tax_paid_from_traditional = pay_tax(state, np.maximum(annual_tax, 0.0))
+            _deposit(state, np.maximum(-annual_tax, 0.0), current_weights)
             # Selling to pay the tax realizes gains of the following tax year
             ledger.record_flows(state, balances_before, t)
 
