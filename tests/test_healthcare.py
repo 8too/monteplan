@@ -40,7 +40,9 @@ def _terminal_wealth(healthcare: HealthcareCost | None, retirement_age: int = 60
 
 class TestHealthcare:
     def test_costs_are_paid_on_top_of_spending(self) -> None:
-        healthcare = HealthcareCost(monthly_premium=600, monthly_out_of_pocket=400, growth_rate=0)
+        healthcare = HealthcareCost(
+            monthly_premium=600, monthly_aca_out_of_pocket=400, growth_rate=0
+        )
         assert _terminal_wealth(healthcare) == pytest.approx(1e6 - 24 * 5_000)
 
     def test_costs_grow_monthly_at_the_growth_rate(self) -> None:
@@ -151,6 +153,13 @@ class TestMedicare:
         wealth = _zero_basis_wealth(healthcare, current_age=64, end_age=66)
         # Age 64: the ACA plan; from 65: Part B plus the supplement
         assert wealth == pytest.approx(1e6 - 24 * 4_000 - 12 * 1_000 - 12 * (202.90 + 300))
+
+    def test_out_of_pocket_switches_at_medicare_age(self) -> None:
+        healthcare = HealthcareCost(
+            monthly_aca_out_of_pocket=800, monthly_medicare_out_of_pocket=50, growth_rate=0
+        )
+        wealth = _zero_basis_wealth(healthcare, current_age=64, end_age=66)
+        assert wealth == pytest.approx(1e6 - 24 * 4_000 - 12 * 800 - 12 * (202.90 + 50))
 
     def test_part_b_for_each_enrollee(self) -> None:
         healthcare = HealthcareCost(

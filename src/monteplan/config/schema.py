@@ -178,13 +178,23 @@ class HealthcareCost(BaseModel):
         default=1, ge=1, le=2, description="People covered, and Medicare enrollees from 65"
     )
     medicare_age: int = Field(default=65, ge=0, le=120, description="Age Medicare starts")
+    monthly_aca_out_of_pocket: float = Field(
+        default=0.0,
+        ge=0,
+        description="Monthly out-of-pocket costs under the ACA plan today",
+    )
     monthly_medicare_supplement: float = Field(
         default=0.0,
         ge=0,
-        description="Monthly Medigap and Part D plan premiums of the household today",
+        description=(
+            "Monthly Medigap or Medicare Advantage and Part D plan premiums of the "
+            "household today"
+        ),
     )
-    monthly_out_of_pocket: float = Field(
-        default=0.0, ge=0, description="Monthly out-of-pocket costs today"
+    monthly_medicare_out_of_pocket: float = Field(
+        default=0.0,
+        ge=0,
+        description="Monthly out-of-pocket costs under Medicare today",
     )
     growth_rate: float = Field(
         default=0.05,

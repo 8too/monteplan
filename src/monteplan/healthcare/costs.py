@@ -15,11 +15,13 @@ from monteplan.healthcare.medicare import MedicarePremiums
 class HealthcareModel:
     """Monthly healthcare costs and the year-end premium tax credit, per path.
 
-    Before the Medicare age the household pays the full premium of its ACA plan each month
-    and gets the premium tax credit for the year's income at year end. From the Medicare age
+    Before the Medicare age the household pays the full premium of its ACA plan and its
+    out-of-pocket costs under that plan each month, and gets the premium tax credit for the
+    year's income at year end. From the Medicare age
     each enrollee pays the Part B premium and the IRMAA surcharges set by the income of two
-    years earlier. Income before the simulation start is unknown, so the first two years
-    have no surcharges.
+    years earlier, and the household pays its supplemental premiums and its out-of-pocket
+    costs under Medicare. Income before the simulation start is unknown, so the first two
+    years have no surcharges.
 
     Premiums, surcharges and out-of-pocket costs grow at the configured rate from the
     simulation start; the income thresholds are indexed by simulated inflation.
@@ -54,21 +56,21 @@ class HealthcareModel:
         """
         config = self._config
         growth = (1.0 + self._monthly_growth) ** step
-        out_of_pocket = config.monthly_out_of_pocket * growth
         if age < config.medicare_age:
             plan = config.monthly_premium * growth
             self._plan_premiums += np.where(paying, plan, 0.0)
             self._benchmark_premiums += np.where(
                 paying, config.monthly_benchmark_premium * growth, 0.0
             )
+            out_of_pocket = config.monthly_aca_out_of_pocket * growth
             return np.full(paying.shape, plan + out_of_pocket)
         per_enrollee = (
             self._medicare.part_b_premium + self._irmaa_part_b + self._irmaa_part_d
         ) * growth
         result: NDArray[np.floating[Any]] = (
             config.household_size * per_enrollee
-            + config.monthly_medicare_supplement * growth
-            + out_of_pocket
+            + (config.monthly_medicare_supplement + config.monthly_medicare_out_of_pocket)
+            * growth
         )
         return result
 
